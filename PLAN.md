@@ -14,23 +14,11 @@ Current implementation state:
 - [x] Step 2 — `config.example.json`
 - [x] Step 3 — `backend/requirements.txt`
 - [x] Step 4 — `backend/import_puzzles.py`
-- [~] Step 5 — `backend/core.py`
+- [x] Step 5 — `backend/core.py`
 - [ ] Step 6 — `backend/test_core.py`
 - [ ] Step 7 — `backend/app.py`
 - [ ] Step 8 — frontend bootstrap
 - [ ] Step 9+ — frontend configuration and MVP UI
-
-Step 5 is not approved yet.
-
-Latest pending Step 5 revision:
-
-- keep raw Lichess FEN/Moves unchanged in `puzzles.db`;
-- transform them only when building the session payload;
-- apply Lichess `Moves[0]` using `python-chess`;
-- return the resulting FEN;
-- return only `Moves[1:]`;
-- malformed puzzle data must raise a clear `RuntimeError`;
-- no other file should change.
 
 ---
 
@@ -657,7 +645,7 @@ No runtime application logic.
 
 ## Step 5 — `backend/core.py`
 
-Status: in progress.
+Status: approved.
 
 Responsibilities:
 
@@ -686,15 +674,11 @@ Responsibilities:
 
 Do not add HTTP concerns.
 
-Current pending revision:
-
-transform Lichess FEN/Moves in `_session_payload()` as documented above.
-
 ---
 
 ## Step 6 — `backend/test_core.py`
 
-Status: not started.
+Status: next implementation step.
 
 Add focused `unittest` coverage for non-trivial core behavior.
 
