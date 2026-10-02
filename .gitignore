@@ -1,0 +1,13 @@
+config.json
+*.db
+*.db-*
+
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+
+node_modules/
+frontend/.svelte-kit/
+frontend/build/
+frontend/dist/
