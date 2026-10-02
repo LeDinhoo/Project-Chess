@@ -5,6 +5,7 @@ import io
 import json
 import re
 import sqlite3
+from contextlib import contextmanager
 from datetime import date, timedelta
 from pathlib import Path
 from typing import Any, Iterable
@@ -171,7 +172,7 @@ def _creates_discovered_attack(
             continue
         old_attackers = set(before.attackers(attacker_color, target))
         new_attackers = set(after.attackers(attacker_color, target)) - old_attackers
-        if any(move.from_square in chess.between(attacker, target) for attacker in new_attackers):
+        if any(chess.BB_SQUARES[move.from_square] & chess.between(attacker, target) for attacker in new_attackers):
             return True
     return False
 
@@ -256,16 +257,24 @@ class Core:
         self.puzzle_db_path = Path(puzzle_db_path)
         self.initialize()
 
-    def _connect(self) -> sqlite3.Connection:
+    @contextmanager
+    def _connect(self):
         connection = sqlite3.connect(self.app_db_path)
         connection.execute("PRAGMA foreign_keys = ON")
         connection.row_factory = sqlite3.Row
-        return connection
+        try:
+            yield connection
+        except:
+            connection.rollback()
+            raise
+        else:
+            connection.commit()
+        finally:
+            connection.close()
 
     def initialize(self) -> None:
         self.app_db_path.parent.mkdir(parents=True, exist_ok=True)
-        connection = self._connect()
-        try:
+        with self._connect() as connection:
             connection.executescript(
                 """
                 CREATE TABLE IF NOT EXISTS games (
@@ -308,9 +317,6 @@ class Core:
                 );
                 """
             )
-            connection.commit()
-        finally:
-            connection.close()
 
     def sync(self) -> dict[str, int]:
         config = _config(self.config_path)
@@ -416,7 +422,12 @@ class Core:
         if puzzle_connection is None:
             return []
         try:
-            known_ids = {row["puzzle_id"] for row in connection.execute("SELECT puzzle_id FROM puzzle_progress")}
+            known_ids = {
+                row["puzzle_id"]
+                for row in connection.execute(
+                    "SELECT puzzle_id FROM puzzle_progress UNION SELECT puzzle_id FROM session_puzzles"
+                )
+            }
             recent_ids = {
                 row["puzzle_id"]
                 for row in connection.execute(
