@@ -22,13 +22,15 @@ Current implementation state:
 - [x] Step 10 — Tailwind setup
 - [x] Step 11 — minimal shadcn utilities/components actually used (preset + Button)
 - [x] Step 12 — Chessground integration
-- [ ] Step 13 — one MVP `+page.svelte` (Gates 1 and 2 complete; Gate 3 next)
+- [x] Step 13 — one MVP `+page.svelte` (Gates 1, 2, and 3 complete)
 
 Audit status: complete.
 
-Current frontend gate: **Step 13 Gate 3 — session progression and completion**.
+Current frontend status: **Step 13 complete**.
 
-Step 13 Gates 1 and 2 are complete and user-approved. Gate 3 is the current/next implementation gate.
+Next runtime prerequisite: restore the normal port-8000 development runtime before starting any later implementation step.
+
+Step 13 Gates 1, 2, and 3 are complete and user-approved.
 
 - Lichess importer validation correction: `b249550a37494e650d9510ff11d8a9b5f737a31f`;
 - focused importer regression coverage: `b1df31fc56b51ab957e518ef57db581f3d2eadcc`;
@@ -799,7 +801,7 @@ Expected sequence, adjusted only if the generated project proves a file unnecess
 4. Tailwind setup (Step 10 — completed);
 5. minimal shadcn utilities/components actually used (Step 11 — completed with the selected preset and first actually-used Button);
 6. Chessground integration (Step 12 — completed);
-7. one MVP `+page.svelte` (Step 13 Gates 1 and 2 — completed; Gate 3 — current/next).
+7. one MVP `+page.svelte` (Step 13 Gates 1, 2, and 3 — completed).
 
 Frontend requirements:
 
@@ -856,13 +858,13 @@ Implementation:
 - lifecycle mount and cleanup implemented;
 - current board remains a static integration proof only.
 
-Next frontend gate: Step 13 Gate 3 — session progression and completion.
+Next frontend gate: Step 13 Gate 3 — session progression and completion (completed).
 
 ---
 
 ## Step 13 — one MVP `+page.svelte`
 
-Status: Gates 1 and 2 complete and user-approved. Gate 3 is the current/next implementation gate.
+Status: Gates 1, 2, and 3 complete and user-approved.
 
 ### Gate 1 — MVP shell, Button, and board-coordinate refinement
 
@@ -939,15 +941,52 @@ Gate 3 was not started.
 
 ### Gate 3 — session progression and completion
 
-Status: future work; not started.
+Status: complete and user-approved.
 
-Do not mark these complete as part of Gate 2:
+Approved commit:
 
-- first-unfinished puzzle selection;
-- next-puzzle progression;
-- multi-puzzle session progression;
-- final session-completion state;
+- `f28b3a53e10e13292ed3f57b23f2928639d72aa0` — `feat: add session progression`.
+
+Implemented:
+
+- first-unfinished puzzle selection for today's and historical sessions;
+- derived recorded counts from non-null puzzle results;
+- guarded `Next puzzle` progression through the next unfinished puzzle;
+- multi-puzzle session progression without recreating the frozen session;
+- explicit session-complete state;
+- completed sessions entering the terminal state without reactivating a puzzle or starting a timer;
 - history refresh after progression.
+
+Validation completed before commit:
+
+- `npm.cmd run check` passed with 0 errors and 0 warnings;
+- `npm.cmd run build` passed;
+- `git diff --check` passed;
+- only `frontend/src/routes/+page.svelte` was committed.
+
+Runtime validation:
+
+- today's partially completed session resumed at the first unfinished puzzle (`2` with `1/20` recorded), skipping the recorded puzzle;
+- a deliberate wrong move froze the timer, persisted `failed`, increased the local recorded count once, and left learning retry available;
+- the successful learning retry did not overwrite the persisted failure, and `Next puzzle` remained unavailable until the retry solution was complete;
+- Next progression selected the next unfinished puzzle, reset the timer and transient state, and refreshed session history;
+- repeated progression reached a clean success on a later puzzle, persisted it, and advanced again;
+- reopening today's session preserved failed and successful results, elapsed times, recorded count, and first-unfinished resume behavior; the smoke flow reached `4/20` and reopened the next unfinished puzzle;
+- naturally completed-session browser coverage remains pending because no naturally completed historical session was available.
+
+Runtime environment note:
+
+- an unidentified Node process still occupies port `8000` and was not terminated during the Gate 3 smoke;
+- FastAPI ran on port `8001` through a temporary untracked Vite proxy;
+- the temporary proxy configuration was deleted after testing;
+- tracked `frontend/vite.config.ts` remained unchanged;
+- the port-8000 issue is a runtime prerequisite, not an application defect.
+
+### Runtime prerequisite — restore normal port-8000 development runtime
+
+Status: pending.
+
+Restore the normal port-8000 development listener before starting any later implementation step. This is an environment-maintenance prerequisite, not a new product milestone.
 
 ---
 
