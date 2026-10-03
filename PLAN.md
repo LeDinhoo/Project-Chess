@@ -28,7 +28,7 @@ Audit status: complete.
 
 Current frontend status: **Step 13 complete**.
 
-Next runtime prerequisite: restore the normal port-8000 development runtime before starting any later implementation step.
+Next implementation step: none currently defined; the planned MVP implementation is complete.
 
 Step 13 Gates 1, 2, and 3 are complete and user-approved.
 
@@ -976,17 +976,31 @@ Runtime validation:
 
 Runtime environment note:
 
-- an unidentified Node process still occupies port `8000` and was not terminated during the Gate 3 smoke;
+- during the Gate 3 smoke, an unidentified Node process occupied port `8000`; the normal port-8000 runtime was restored afterward without changing application configuration;
 - FastAPI ran on port `8001` through a temporary untracked Vite proxy;
 - the temporary proxy configuration was deleted after testing;
 - tracked `frontend/vite.config.ts` remained unchanged;
-- the port-8000 issue is a runtime prerequisite, not an application defect.
+- the port-8000 issue was a runtime prerequisite, not an application defect.
 
 ### Runtime prerequisite — restore normal port-8000 development runtime
 
-Status: pending.
+Status: complete.
 
-Restore the normal port-8000 development listener before starting any later implementation step. This is an environment-maintenance prerequisite, not a new product milestone.
+Verified normal development startup:
+
+Backend:
+
+```text
+.\.venv\Scripts\python.exe -m uvicorn backend.app:app --host 127.0.0.1 --port 8000
+```
+
+Frontend:
+
+```text
+npm.cmd run dev -- --host 127.0.0.1
+```
+
+The tracked `frontend/vite.config.ts` proxy reaches FastAPI on port `8000`; the temporary port-8001 workaround is no longer required, no permanent source/config workaround was introduced, and `frontend/vite.config.ts` remains unchanged.
 
 ---
 
