@@ -21,7 +21,8 @@ Current implementation state:
 - [x] Step 9 — `frontend/vite.config.ts` Vite development proxy
 - [x] Step 10 — Tailwind setup
 - [ ] Step 11 — minimal shadcn utilities/components actually used (deferred)
-- [ ] Step 12 — Chessground integration (next)
+- [x] Step 12 — Chessground integration
+- [ ] Step 13 — one MVP `+page.svelte` (next)
 
 Audit status: complete.
 
@@ -793,8 +794,8 @@ Expected sequence, adjusted only if the generated project proves a file unnecess
 3. Vite configuration (Step 9 — completed);
 4. Tailwind setup (Step 10 — completed);
 5. minimal shadcn utilities/components actually used (Step 11 — deferred until the first actually-used shadcn component);
-6. Chessground integration (Step 12 — next);
-7. one MVP `+page.svelte` (Step 13).
+6. Chessground integration (Step 12 — completed);
+7. one MVP `+page.svelte` (Step 13 — next).
 
 Frontend requirements:
 
@@ -824,6 +825,23 @@ Only install/use shadcn components actually required by the UI.
 No unused component library installation.
 
 When the first actually-used shadcn component is introduced, initialize shadcn-svelte and add only that component.
+
+---
+
+## Step 12 — Chessground integration
+
+Status: approved and committed.
+
+Implementation:
+
+- official package: `@lichess-org/chessground`;
+- exact version: `10.4.1`;
+- direct Svelte integration without a wrapper;
+- official package CSS imported directly;
+- lifecycle mount and cleanup implemented;
+- current board remains a static integration proof only.
+
+Next existing frontend step: Step 13 — one MVP `+page.svelte`.
 
 ---
 
