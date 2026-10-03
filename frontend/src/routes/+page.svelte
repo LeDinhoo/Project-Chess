@@ -6,6 +6,9 @@
 	import '@lichess-org/chessground/assets/chessground.brown.css';
 	import '@lichess-org/chessground/assets/chessground.cburnett.css';
 
+	type Square = Parameters<ReturnType<typeof Chessground>['move']>[0];
+	type PlayerColor = 'white' | 'black';
+
 	type SessionSummary = {
 		date: string;
 		completed: number;
@@ -21,6 +24,11 @@
 		themes: string;
 		result: 'success' | 'failed' | null;
 		elapsed_ms: number | null;
+	};
+
+	type SavedResult = {
+		result: 'success' | 'failed';
+		elapsed_ms: number;
 	};
 
 	type SessionPayload = {
@@ -43,6 +51,16 @@
 	let syncState = $state<'idle' | 'loading' | 'success' | 'error'>('idle');
 	let syncMessage = $state('');
 	let currentPuzzle = $derived(currentSession?.puzzles[currentIndex]);
+	let solutionIndex = $state(0);
+	let attemptStartedAt = $state<number | undefined>(undefined);
+	let displayElapsedMs = $state(0);
+	let timerId: number | undefined;
+	let attemptFailed = $state(false);
+	let failurePersisted = $state(false);
+	let feedback = $state('');
+	let savingResult = $state(false);
+	let resultSaveError = $state('');
+	let puzzleSolved = $state(false);
 
 	async function requestError(response: Response, fallback: string) {
 		try {
@@ -71,11 +89,244 @@
 		return caught instanceof Error ? caught.message : fallback;
 	}
 
-	function updateBoard() {
-		ground?.set({
-			fen: currentPuzzle?.fen ?? startingFen,
-			viewOnly: true
+	function formatElapsed(elapsedMs: number) {
+		const totalSeconds = Math.floor(elapsedMs / 1000);
+		return `${String(Math.floor(totalSeconds / 60)).padStart(2, '0')}:${String(totalSeconds % 60).padStart(2, '0')}.${Math.floor((elapsedMs % 1000) / 100)}`;
+	}
+
+	function stopTimer() {
+		if (timerId !== undefined) {
+			clearInterval(timerId);
+			timerId = undefined;
+		}
+		attemptStartedAt = undefined;
+	}
+
+	function elapsedSinceStart() {
+		return attemptStartedAt === undefined
+			? displayElapsedMs
+			: Math.max(0, Math.round(performance.now() - attemptStartedAt));
+	}
+
+	function startTimer() {
+		stopTimer();
+		attemptStartedAt = performance.now();
+		displayElapsedMs = 0;
+		timerId = window.setInterval(() => {
+			displayElapsedMs = elapsedSinceStart();
+		}, 100);
+	}
+
+	function puzzleColor(fen: string): PlayerColor {
+		return fen.split(/\s+/)[1] === 'b' ? 'black' : 'white';
+	}
+
+	function parseUci(token: string) {
+		if (!/^[a-h][1-8][a-h][1-8]$/.test(token)) return null;
+		return {
+			from: token.slice(0, 2) as Square,
+			to: token.slice(2, 4) as Square
+		};
+	}
+
+	function puzzleMoves(puzzle: SessionPuzzle) {
+		return puzzle.moves.trim() ? puzzle.moves.trim().split(/\s+/) : [];
+	}
+
+	function setLocalResult(
+		date: string,
+		position: number,
+		result: 'success' | 'failed',
+		elapsedMs: number
+	) {
+		if (!currentSession || currentSession.date !== date) return;
+		currentSession = {
+			...currentSession,
+			puzzles: currentSession.puzzles.map((puzzle) =>
+				puzzle.position === position ? { ...puzzle, result, elapsed_ms: elapsedMs } : puzzle
+			)
+		};
+	}
+
+	async function saveResult(
+		date: string,
+		position: number,
+		success: boolean,
+		elapsedMs: number
+	): Promise<SavedResult | null> {
+		if (savingResult) return null;
+		savingResult = true;
+		resultSaveError = '';
+		try {
+			const response = await fetch(`/api/sessions/${encodeURIComponent(date)}/${position}/result`, {
+				method: 'POST',
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify({ success, elapsed_ms: elapsedMs })
+			});
+			if (!response.ok) {
+				throw new Error(await requestError(response, 'Could not save the puzzle result.'));
+			}
+			const saved = await responseJson<SavedResult>(response);
+			if (
+				!saved ||
+				(saved.result !== 'success' && saved.result !== 'failed') ||
+				typeof saved.elapsed_ms !== 'number'
+			) {
+				throw new Error(backendResponseError);
+			}
+			setLocalResult(date, position, saved.result, saved.elapsed_ms);
+			return saved;
+		} catch (caught) {
+			if (currentSession?.date === date && currentSession.puzzles[currentIndex]?.position === position) {
+				resultSaveError = caughtMessage(caught, 'Could not save the puzzle result.');
+				if (success) feedback = 'Solved, but the result could not be saved.';
+			}
+			return null;
+		} finally {
+			savingResult = false;
+		}
+	}
+
+	function configureBoard(puzzle: SessionPuzzle, interactive: boolean) {
+		if (!ground) return;
+		const color = puzzleColor(puzzle.fen);
+		ground.stop();
+		ground.set({
+			fen: puzzle.fen,
+			orientation: color,
+			turnColor: color,
+			...(interactive
+				? {
+					movable: {
+						free: true,
+						color,
+						events: { after: handleUserMove }
+					},
+					premovable: { enabled: false }
+				}
+				: {})
 		});
+	}
+
+	function completePuzzle() {
+		const session = currentSession;
+		const puzzle = currentPuzzle;
+		if (!session || !puzzle || puzzleSolved) return;
+
+		const elapsedMs = attemptFailed ? displayElapsedMs : elapsedSinceStart();
+		stopTimer();
+		displayElapsedMs = elapsedMs;
+		puzzleSolved = true;
+		ground?.stop();
+
+		if (attemptFailed) {
+			feedback = failurePersisted
+				? 'Solved on retry — first attempt recorded as failed.'
+				: puzzle.result === 'success'
+					? 'Result was already recorded as successful.'
+				: 'Solved on retry — first attempt failed, but the result could not be saved.';
+			return;
+		}
+
+		feedback = 'Solved';
+		void saveResult(session.date, puzzle.position, true, elapsedMs).then((saved) => {
+			if (saved?.result === 'failed') {
+				feedback = 'Solved, but this puzzle was already recorded as failed.';
+			}
+		});
+	}
+
+	function resetForRetry(puzzle: SessionPuzzle) {
+		solutionIndex = 0;
+		puzzleSolved = false;
+		feedback = 'Wrong — try again';
+		configureBoard(puzzle, true);
+	}
+
+	function handleUserMove(orig: Square, dest: Square) {
+		const puzzle = currentPuzzle;
+		if (!puzzle || puzzleSolved || (puzzle.result !== null && !attemptFailed)) return;
+
+		const moves = puzzleMoves(puzzle);
+		const expected = moves[solutionIndex];
+		if (!expected || `${orig}${dest}` !== expected.slice(0, 4)) {
+			if (!attemptFailed) {
+				attemptFailed = true;
+				failurePersisted = false;
+				const elapsedMs = elapsedSinceStart();
+				stopTimer();
+				displayElapsedMs = elapsedMs;
+				const date = currentSession?.date;
+				if (date) {
+					void saveResult(date, puzzle.position, false, elapsedMs).then((saved) => {
+						if (saved?.result === 'failed') {
+							failurePersisted = true;
+							if (
+								puzzleSolved &&
+								currentSession?.date === date &&
+								currentPuzzle?.position === puzzle.position
+							) {
+								feedback = 'Solved on retry — first attempt recorded as failed.';
+							}
+						} else if (
+							saved?.result === 'success' &&
+							currentSession?.date === date &&
+							currentPuzzle?.position === puzzle.position
+						) {
+							feedback = 'Result was already recorded as successful.';
+						}
+					});
+				}
+			}
+			resetForRetry(puzzle);
+			return;
+		}
+
+		solutionIndex += 1;
+		const opponentMove = moves[solutionIndex];
+		if (opponentMove) {
+			const parsed = parseUci(opponentMove);
+			if (!parsed) {
+				stopTimer();
+				puzzleSolved = true;
+				feedback = 'Puzzle data is invalid.';
+				ground?.stop();
+				return;
+			}
+			ground?.move(parsed.from, parsed.to);
+			solutionIndex += 1;
+			ground?.set({ turnColor: puzzleColor(puzzle.fen) });
+		}
+
+		if (solutionIndex >= moves.length) completePuzzle();
+		else feedback = 'Your move';
+	}
+
+	function activatePuzzle(puzzle: SessionPuzzle | undefined) {
+		stopTimer();
+		solutionIndex = 0;
+		attemptFailed = puzzle?.result === 'failed';
+		failurePersisted = puzzle?.result === 'failed';
+		puzzleSolved = puzzle?.result !== null && puzzle?.result !== undefined;
+		displayElapsedMs = puzzle?.elapsed_ms ?? 0;
+		feedback = '';
+		resultSaveError = '';
+
+		if (!puzzle) {
+			ground?.stop();
+			return;
+		}
+		if (puzzle.result !== null) {
+			configureBoard(puzzle, false);
+			feedback =
+				puzzle.result === 'success' ? 'Solved — result already recorded' : 'Failed — result already recorded';
+			return;
+		}
+
+		puzzleSolved = false;
+		configureBoard(puzzle, true);
+		feedback = 'Your move';
+		startTimer();
 	}
 
 	async function loadSessions() {
@@ -124,9 +375,10 @@
 			if (!response.ok) {
 				throw new Error(await requestError(response, 'Could not start today’s session.'));
 			}
-			currentSession = await responseJson<SessionPayload>(response);
+			const session = await responseJson<SessionPayload>(response);
+			currentSession = session;
 			currentIndex = 0;
-			updateBoard();
+			activatePuzzle(session.puzzles[0]);
 			await loadSessions();
 		} catch (caught) {
 			error = caughtMessage(caught, 'Could not start today’s session.');
@@ -143,9 +395,10 @@
 			if (!response.ok) {
 				throw new Error(await requestError(response, 'Could not load that session.'));
 			}
-			currentSession = await responseJson<SessionPayload>(response);
+			const session = await responseJson<SessionPayload>(response);
+			currentSession = session;
 			currentIndex = 0;
-			updateBoard();
+			activatePuzzle(session.puzzles[0]);
 		} catch (caught) {
 			error = caughtMessage(caught, 'Could not load that session.');
 		} finally {
@@ -157,13 +410,15 @@
 		if (boardElement) {
 			ground = Chessground(boardElement, {
 				fen: startingFen,
-				viewOnly: true
+				viewOnly: false
 			});
+			ground.stop();
 		}
 
 		void loadSessions();
 
 		return () => {
+			stopTimer();
 			ground?.destroy();
 		};
 	});
@@ -195,7 +450,7 @@
 					variant="secondary"
 					size="lg"
 					onclick={startToday}
-					disabled={sessionLoading}
+					disabled={sessionLoading || savingResult}
 				>
 					{sessionLoading ? 'Loading…' : 'Start / Resume Today'}
 				</Button>
@@ -227,7 +482,7 @@
 								type="button"
 								class="flex w-full items-center justify-between border px-3 py-3 text-left transition disabled:cursor-not-allowed disabled:opacity-50 {currentSession?.date === session.date ? 'border-primary bg-accent text-accent-foreground' : 'border-border bg-background hover:bg-accent'}"
 								onclick={() => openSession(session.date)}
-								disabled={sessionLoading}
+								disabled={sessionLoading || savingResult}
 								aria-pressed={currentSession?.date === session.date}
 							>
 								<span class="font-medium">{session.date}</span>
@@ -246,7 +501,17 @@
 						<p class="text-xs font-semibold uppercase tracking-[0.2em] text-primary">Session {currentSession.date}</p>
 						<h2 class="mt-1 text-2xl font-semibold tracking-tight">Puzzle {currentPuzzle.position} of {currentSession.puzzles.length}</h2>
 					</div>
-					<div class="flex flex-wrap gap-x-4 gap-y-1 text-sm text-muted-foreground">
+					<div class="flex flex-wrap items-center gap-x-4 gap-y-1 text-sm text-muted-foreground">
+						<span role="timer" aria-label="Elapsed time">Time: {formatElapsed(displayElapsedMs)}</span>
+						{#if feedback}
+							<span aria-live="polite">{feedback}</span>
+						{/if}
+						{#if savingResult}
+							<span role="status" aria-live="polite">Saving result…</span>
+						{/if}
+						{#if resultSaveError}
+							<span class="text-destructive" role="alert">{resultSaveError}</span>
+						{/if}
 						<span>{currentSession.completed}/{currentSession.puzzles.length} recorded</span>
 						<span>Rating: {currentPuzzle.rating}</span>
 						<span>Themes: {currentPuzzle.themes}</span>
