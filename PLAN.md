@@ -19,7 +19,8 @@ Current implementation state:
 - [x] Step 7 — `backend/app.py`
 - [x] Step 8 — frontend bootstrap
 - [x] Step 9 — `frontend/vite.config.ts` Vite development proxy
-- [ ] Step 10 — Tailwind setup
+- [x] Step 10 — Tailwind setup
+- [ ] Step 11 — minimal shadcn utilities/components actually used
 
 ---
 
@@ -761,7 +762,14 @@ Use Vite's native `server.proxy` configuration while preserving the generated Sv
 
 ## Step 10 — Tailwind setup
 
-Status: next implementation step.
+Status: approved and committed.
+
+Implementation:
+
+- Tailwind CSS 4;
+- `@tailwindcss/vite`;
+- global `frontend/src/routes/layout.css` import from `frontend/src/routes/+layout.svelte`;
+- existing Vite `/api` → `http://localhost:8000` proxy preserved.
 
 Each manually modified file receives its own review gate.
 
@@ -770,8 +778,8 @@ Expected sequence, adjusted only if the generated project proves a file unnecess
 1. frontend dependency configuration;
 2. npm lockfile;
 3. Vite configuration (Step 9 — completed);
-4. Tailwind setup (Step 10 — next);
-5. minimal shadcn utilities/components actually used (Step 11);
+4. Tailwind setup (Step 10 — completed);
+5. minimal shadcn utilities/components actually used (Step 11 — next);
 6. Chessground integration (Step 12);
 7. one MVP `+page.svelte` (Step 13).
 
@@ -783,6 +791,18 @@ Frontend requirements:
 - no global store;
 - no API abstraction;
 - no unused component library installation.
+
+---
+
+## Step 11 — minimal shadcn utilities/components actually used
+
+Status: next implementation step.
+
+Scope:
+
+Only install/use shadcn components actually required by the UI.
+
+No unused component library installation.
 
 ---
 
