@@ -15,7 +15,7 @@ Current implementation state:
 - [x] Step 3 — `backend/requirements.txt`
 - [x] Step 4 — `backend/import_puzzles.py`
 - [x] Step 5 — `backend/core.py`
-- [ ] Step 6 — `backend/test_core.py`
+- [x] Step 6 — `backend/test_core.py`
 - [ ] Step 7 — `backend/app.py`
 - [ ] Step 8 — frontend bootstrap
 - [ ] Step 9+ — frontend configuration and MVP UI
@@ -678,7 +678,7 @@ Do not add HTTP concerns.
 
 ## Step 6 — `backend/test_core.py`
 
-Status: next implementation step.
+Status: approved and committed.
 
 Add focused `unittest` coverage for non-trivial core behavior.
 
@@ -705,7 +705,7 @@ No testing dependency.
 
 ## Step 7 — `backend/app.py`
 
-Status: not started.
+Status: next implementation step.
 
 Create thin FastAPI handlers for only the approved API.
 
