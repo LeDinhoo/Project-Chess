@@ -20,11 +20,15 @@ Current implementation state:
 - [x] Step 8 — frontend bootstrap
 - [x] Step 9 — `frontend/vite.config.ts` Vite development proxy
 - [x] Step 10 — Tailwind setup
-- [ ] Step 11 — minimal shadcn utilities/components actually used (deferred)
+- [x] Step 11 — minimal shadcn utilities/components actually used (preset + Button)
 - [x] Step 12 — Chessground integration
-- [ ] Step 13 — one MVP `+page.svelte` (next)
+- [ ] Step 13 — one MVP `+page.svelte` (Gate 1 complete; Gate 2 next)
 
 Audit status: complete.
+
+Current frontend gate: **Step 13 Gate 2 — puzzle interaction and result flow**.
+
+Step 13 Gate 1 is complete and user-approved. Gate 2 has not started.
 
 - Lichess importer validation correction: `b249550a37494e650d9510ff11d8a9b5f737a31f`;
 - focused importer regression coverage: `b1df31fc56b51ab957e518ef57db581f3d2eadcc`;
@@ -793,9 +797,9 @@ Expected sequence, adjusted only if the generated project proves a file unnecess
 2. npm lockfile;
 3. Vite configuration (Step 9 — completed);
 4. Tailwind setup (Step 10 — completed);
-5. minimal shadcn utilities/components actually used (Step 11 — deferred until the first actually-used shadcn component);
+5. minimal shadcn utilities/components actually used (Step 11 — completed with the selected preset and first actually-used Button);
 6. Chessground integration (Step 12 — completed);
-7. one MVP `+page.svelte` (Step 13 — next).
+7. one MVP `+page.svelte` (Step 13 Gate 1 — completed; Gate 2 — current/next).
 
 Frontend requirements:
 
@@ -810,21 +814,32 @@ Frontend requirements:
 
 ## Step 11 — minimal shadcn utilities/components actually used
 
-Status: deferred.
+Status: approved and implemented with minimal scope.
 
-Reason:
+History:
 
-- no current UI consumes a shadcn component;
-- initialization would add unused infrastructure;
-- initialize shadcn-svelte only when the first actually-used shadcn component is introduced.
+- originally deferred under Ponytail/YAGNI because no current UI consumed a shadcn component;
+- later initialized because the user explicitly selected preset `b1ob4f1k` and requested the Button component.
 
-Scope:
+Resolved preset:
 
-Only install/use shadcn components actually required by the UI.
+- style: `sera`;
+- base color: `neutral`;
+- font: Inter Variable;
+- radius: `0rem`.
 
-No unused component library installation.
+Approved commits:
 
-When the first actually-used shadcn component is introduced, initialize shadcn-svelte and add only that component.
+- `fa2a01a64179036df128151a8705207faf7bc2d4` — `chore: initialize shadcn preset`;
+- `3850ed7b218128ff71286c1ee3e1856ad964344c` — `feat: add shadcn button component`.
+
+Current scope:
+
+- only the official Button component has been added so far;
+- only the components actually required by the UI may be added;
+- the full shadcn-svelte component library is not required by this plan.
+
+Preserve the Ponytail/YAGNI rule: add another shadcn component only when the UI actually needs it.
 
 ---
 
@@ -841,7 +856,79 @@ Implementation:
 - lifecycle mount and cleanup implemented;
 - current board remains a static integration proof only.
 
-Next existing frontend step: Step 13 — one MVP `+page.svelte`.
+Next frontend gate: Step 13 Gate 2 — puzzle interaction and result flow.
+
+---
+
+## Step 13 — one MVP `+page.svelte`
+
+Status: Gate 1 complete and user-approved. Gate 2 is the current/next implementation gate. Gate 3 remains future work.
+
+### Gate 1 — MVP shell, Button, and board-coordinate refinement
+
+Status: complete and user-approved after desktop visual review.
+
+Approved commit:
+
+- `166069a9c81437b267b1afb55572eac6269e8958` — `feat: build mvp training shell`.
+
+Implemented:
+
+- one MVP page in `frontend/src/routes/+page.svelte`;
+- initial session-history loading;
+- manual Chess.com Sync action;
+- Start / Resume Today;
+- historical session reopening;
+- loading, status, and error states;
+- backend-provided puzzle FEN rendered directly in Chessground;
+- one Chessground instance with `viewOnly: true`;
+- dominant board sizing at approximately `min(86vh, 100%)`;
+- compact desktop left rail with responsive mobile stacking;
+- official shadcn-svelte Button for `Sync games` and `Start / Resume Today`;
+- `default` and `secondary` variants, both using `size="lg"`;
+- semantic `sera` preset theme tokens;
+- responsive Chessground rank/file labels using the local `:global(.cg-wrap coords)` override;
+- friendly `Backend unavailable or returned an invalid response.` fallback.
+
+The refresh-time button color flash was not reproducible after Button adoption. No unsupported root-cause claim is recorded.
+
+Not included in Gate 1:
+
+- no draggable puzzle interaction;
+- no UCI move validation;
+- no timer;
+- no result submission or persistence;
+- no retry behavior;
+- no automatic opponent moves;
+- no full puzzle-solving loop;
+- no Gate 2 or Gate 3 behavior.
+
+### Gate 2 — puzzle interaction and result flow
+
+Status: current/next implementation gate; not started.
+
+This gate remains implementation-only future work and retains the existing puzzle-solving requirements above. Do not mark any of these complete before Gate 2 implementation:
+
+- draggable puzzle interaction;
+- expected UCI validation;
+- timer;
+- first-failure persistence;
+- retry behavior;
+- automatic opponent solution moves;
+- successful result recording;
+- full puzzle solving loop.
+
+### Gate 3 — session progression and completion
+
+Status: future work; not started.
+
+Do not mark these complete as part of Gate 2:
+
+- first-unfinished puzzle selection;
+- next-puzzle progression;
+- multi-puzzle session progression;
+- final session-completion state;
+- history refresh after progression.
 
 ---
 
