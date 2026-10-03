@@ -51,6 +51,8 @@
 	let syncState = $state<'idle' | 'loading' | 'success' | 'error'>('idle');
 	let syncMessage = $state('');
 	let currentPuzzle = $derived(currentSession?.puzzles[currentIndex]);
+	let recordedCount = $derived(currentSession?.puzzles.filter((puzzle) => puzzle.result !== null).length ?? 0);
+	let sessionComplete = $state(false);
 	let solutionIndex = $state(0);
 	let attemptStartedAt = $state<number | undefined>(undefined);
 	let displayElapsedMs = $state(0);
@@ -329,6 +331,51 @@
 		startTimer();
 	}
 
+	function enterSessionComplete(displayPuzzle?: SessionPuzzle) {
+		sessionComplete = true;
+		stopTimer();
+		solutionIndex = 0;
+		attemptFailed = false;
+		failurePersisted = false;
+		puzzleSolved = true;
+		displayElapsedMs = 0;
+		feedback = '';
+		resultSaveError = '';
+		if (displayPuzzle) configureBoard(displayPuzzle, false);
+		else ground?.stop();
+	}
+
+	function activateSession(session: SessionPayload) {
+		currentSession = session;
+		const firstUnfinished = session.puzzles.findIndex((puzzle) => puzzle.result === null);
+		const index = firstUnfinished === -1 ? Math.max(session.puzzles.length - 1, 0) : firstUnfinished;
+		currentIndex = index;
+		if (firstUnfinished === -1) {
+			enterSessionComplete(session.puzzles[index]);
+			return;
+		}
+		sessionComplete = false;
+		activatePuzzle(session.puzzles[index]);
+	}
+
+	async function nextPuzzle() {
+		const session = currentSession;
+		const puzzle = currentPuzzle;
+		if (savingResult || !session || !puzzle || !puzzleSolved || puzzle.result === null) return;
+
+		const nextIndex = session.puzzles.findIndex(
+			(candidate, index) => index > currentIndex && candidate.result === null
+		);
+		if (nextIndex === -1) {
+			enterSessionComplete();
+		} else {
+			sessionComplete = false;
+			currentIndex = nextIndex;
+			activatePuzzle(session.puzzles[nextIndex]);
+		}
+		await loadSessions();
+	}
+
 	async function loadSessions() {
 		historyLoading = true;
 		error = '';
@@ -376,9 +423,7 @@
 				throw new Error(await requestError(response, 'Could not start today’s session.'));
 			}
 			const session = await responseJson<SessionPayload>(response);
-			currentSession = session;
-			currentIndex = 0;
-			activatePuzzle(session.puzzles[0]);
+			activateSession(session);
 			await loadSessions();
 		} catch (caught) {
 			error = caughtMessage(caught, 'Could not start today’s session.');
@@ -396,9 +441,7 @@
 				throw new Error(await requestError(response, 'Could not load that session.'));
 			}
 			const session = await responseJson<SessionPayload>(response);
-			currentSession = session;
-			currentIndex = 0;
-			activatePuzzle(session.puzzles[0]);
+			activateSession(session);
 		} catch (caught) {
 			error = caughtMessage(caught, 'Could not load that session.');
 		} finally {
@@ -499,22 +542,39 @@
 				<div class="flex shrink-0 flex-col gap-2 border-b border-border pb-3 sm:flex-row sm:items-end sm:justify-between">
 					<div>
 						<p class="text-xs font-semibold uppercase tracking-[0.2em] text-primary">Session {currentSession.date}</p>
-						<h2 class="mt-1 text-2xl font-semibold tracking-tight">Puzzle {currentPuzzle.position} of {currentSession.puzzles.length}</h2>
+						<h2 class="mt-1 text-2xl font-semibold tracking-tight">
+							{sessionComplete ? 'Session complete' : `Puzzle ${currentPuzzle.position} of ${currentSession.puzzles.length}`}
+						</h2>
+						{#if sessionComplete}
+							<p class="mt-1 text-sm text-muted-foreground">{recordedCount} / {currentSession.puzzles.length} puzzles recorded</p>
+						{/if}
 					</div>
 					<div class="flex flex-wrap items-center gap-x-4 gap-y-1 text-sm text-muted-foreground">
-						<span role="timer" aria-label="Elapsed time">Time: {formatElapsed(displayElapsedMs)}</span>
-						{#if feedback}
-							<span aria-live="polite">{feedback}</span>
+						{#if !sessionComplete}
+							<span role="timer" aria-label="Elapsed time">Time: {formatElapsed(displayElapsedMs)}</span>
+							{#if feedback}
+								<span aria-live="polite">{feedback}</span>
+							{/if}
+							{#if savingResult}
+								<span role="status" aria-live="polite">Saving result…</span>
+							{/if}
+							{#if resultSaveError}
+								<span class="text-destructive" role="alert">{resultSaveError}</span>
+							{/if}
+							<span>{recordedCount}/{currentSession.puzzles.length} recorded</span>
+							<span>Rating: {currentPuzzle.rating}</span>
+							<span>Themes: {currentPuzzle.themes}</span>
+							{#if puzzleSolved}
+								<Button
+									variant="secondary"
+									size="lg"
+									onclick={nextPuzzle}
+									disabled={savingResult || currentPuzzle.result === null}
+								>
+									Next puzzle
+								</Button>
+							{/if}
 						{/if}
-						{#if savingResult}
-							<span role="status" aria-live="polite">Saving result…</span>
-						{/if}
-						{#if resultSaveError}
-							<span class="text-destructive" role="alert">{resultSaveError}</span>
-						{/if}
-						<span>{currentSession.completed}/{currentSession.puzzles.length} recorded</span>
-						<span>Rating: {currentPuzzle.rating}</span>
-						<span>Themes: {currentPuzzle.themes}</span>
 					</div>
 				</div>
 			{:else}
