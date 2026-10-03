@@ -20,7 +20,8 @@ Current implementation state:
 - [x] Step 8 — frontend bootstrap
 - [x] Step 9 — `frontend/vite.config.ts` Vite development proxy
 - [x] Step 10 — Tailwind setup
-- [ ] Step 11 — minimal shadcn utilities/components actually used
+- [ ] Step 11 — minimal shadcn utilities/components actually used (deferred)
+- [ ] Step 12 — Chessground integration (next)
 
 ---
 
@@ -779,8 +780,8 @@ Expected sequence, adjusted only if the generated project proves a file unnecess
 2. npm lockfile;
 3. Vite configuration (Step 9 — completed);
 4. Tailwind setup (Step 10 — completed);
-5. minimal shadcn utilities/components actually used (Step 11 — next);
-6. Chessground integration (Step 12);
+5. minimal shadcn utilities/components actually used (Step 11 — deferred until the first actually-used shadcn component);
+6. Chessground integration (Step 12 — next);
 7. one MVP `+page.svelte` (Step 13).
 
 Frontend requirements:
@@ -796,13 +797,21 @@ Frontend requirements:
 
 ## Step 11 — minimal shadcn utilities/components actually used
 
-Status: next implementation step.
+Status: deferred.
+
+Reason:
+
+- no current UI consumes a shadcn component;
+- initialization would add unused infrastructure;
+- initialize shadcn-svelte only when the first actually-used shadcn component is introduced.
 
 Scope:
 
 Only install/use shadcn components actually required by the UI.
 
 No unused component library installation.
+
+When the first actually-used shadcn component is introduced, initialize shadcn-svelte and add only that component.
 
 ---
 
