@@ -705,7 +705,7 @@ No testing dependency.
 
 ## Step 7 — `backend/app.py`
 
-Status: next implementation step.
+Status: approved and committed.
 
 Create thin FastAPI handlers for only the approved API.
 
@@ -721,7 +721,7 @@ Do not duplicate domain logic.
 
 ## Step 8 — frontend bootstrap
 
-Status: not started.
+Status: next implementation step.
 
 Use the official SvelteKit bootstrap.
 
