@@ -68,3 +68,23 @@ Priority when information conflicts:
 3. current task prompt.
 
 If `PLAN.md` does not match the repository, stop and report the discrepancy instead of guessing.
+
+## Commit after approval
+
+When the user explicitly approves an implementation step:
+
+1. inspect `git status --short`;
+2. stage only the file(s) approved for that step;
+3. inspect `git diff --cached`;
+4. verify no unrelated or unapproved file is staged;
+5. create one dedicated commit for the approved step;
+6. show the commit hash, message, and final `git status --short`;
+7. stop.
+
+Never include unrelated, unapproved, or previously excluded files in the commit.
+
+If the staged diff contains anything outside the approved step, stop instead of committing.
+
+Use a concise Conventional Commit-style message that describes the approved change.
+
+Do not amend, squash, merge, rebase, reset, or push unless explicitly requested.
