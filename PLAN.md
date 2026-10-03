@@ -22,13 +22,13 @@ Current implementation state:
 - [x] Step 10 — Tailwind setup
 - [x] Step 11 — minimal shadcn utilities/components actually used (preset + Button)
 - [x] Step 12 — Chessground integration
-- [ ] Step 13 — one MVP `+page.svelte` (Gate 1 complete; Gate 2 next)
+- [ ] Step 13 — one MVP `+page.svelte` (Gates 1 and 2 complete; Gate 3 next)
 
 Audit status: complete.
 
-Current frontend gate: **Step 13 Gate 2 — puzzle interaction and result flow**.
+Current frontend gate: **Step 13 Gate 3 — session progression and completion**.
 
-Step 13 Gate 1 is complete and user-approved. Gate 2 has not started.
+Step 13 Gates 1 and 2 are complete and user-approved. Gate 3 is the current/next implementation gate.
 
 - Lichess importer validation correction: `b249550a37494e650d9510ff11d8a9b5f737a31f`;
 - focused importer regression coverage: `b1df31fc56b51ab957e518ef57db581f3d2eadcc`;
@@ -799,7 +799,7 @@ Expected sequence, adjusted only if the generated project proves a file unnecess
 4. Tailwind setup (Step 10 — completed);
 5. minimal shadcn utilities/components actually used (Step 11 — completed with the selected preset and first actually-used Button);
 6. Chessground integration (Step 12 — completed);
-7. one MVP `+page.svelte` (Step 13 Gate 1 — completed; Gate 2 — current/next).
+7. one MVP `+page.svelte` (Step 13 Gates 1 and 2 — completed; Gate 3 — current/next).
 
 Frontend requirements:
 
@@ -856,13 +856,13 @@ Implementation:
 - lifecycle mount and cleanup implemented;
 - current board remains a static integration proof only.
 
-Next frontend gate: Step 13 Gate 2 — puzzle interaction and result flow.
+Next frontend gate: Step 13 Gate 3 — session progression and completion.
 
 ---
 
 ## Step 13 — one MVP `+page.svelte`
 
-Status: Gate 1 complete and user-approved. Gate 2 is the current/next implementation gate. Gate 3 remains future work.
+Status: Gates 1 and 2 complete and user-approved. Gate 3 is the current/next implementation gate.
 
 ### Gate 1 — MVP shell, Button, and board-coordinate refinement
 
@@ -905,18 +905,34 @@ Not included in Gate 1:
 
 ### Gate 2 — puzzle interaction and result flow
 
-Status: current/next implementation gate; not started.
+Status: complete and user-approved.
 
-This gate remains implementation-only future work and retains the existing puzzle-solving requirements above. Do not mark any of these complete before Gate 2 implementation:
+Approved commit:
 
-- draggable puzzle interaction;
-- expected UCI validation;
-- timer;
-- first-failure persistence;
-- retry behavior;
-- automatic opponent solution moves;
-- successful result recording;
-- full puzzle solving loop.
+- `e8543eae4eab235aeb03839f7673b0a365704f97` — `feat: add puzzle interaction flow`.
+
+Implemented:
+
+- direct expected-UCI validation through Chessground user-move callbacks, without a frontend chess rules engine;
+- programmatic opponent solution moves through `ground.move(...)` and solving-side board orientation from the backend post-setup FEN;
+- first wrong move permanently failing the scored attempt, immediate first-failure submission, and learning-only retry behavior;
+- separate local attempt failure and confirmed backend failure persistence, so retry success cannot submit or overwrite a later scored result;
+- backend first-result-wins responses treated as authoritative, with already-recorded results not resubmitted;
+- live elapsed timing from `performance.now()` with one 100ms display interval, frozen on failure/completion and cleaned up on puzzle/session changes and destroy;
+- visible interaction, stored-result, and result-save error feedback, with session-changing controls disabled while a result is saving.
+
+Validation completed before commit:
+
+- `npm.cmd run check` passed with 0 errors and 0 warnings;
+- `npm.cmd run build` passed;
+- `git diff --check` passed;
+- only `frontend/src/routes/+page.svelte` was committed.
+
+Runtime limitation:
+
+- real backend puzzle-flow browser smoke remains unverified because `config.json`, `puzzles.db`, and a running backend process are unavailable locally.
+
+Gate 3 was not started.
 
 ### Gate 3 — session progression and completion
 
