@@ -1,3 +1,5 @@
+import csv
+import io
 import json
 import sqlite3
 import tempfile
@@ -9,8 +11,10 @@ from unittest import TestCase, main
 from unittest.mock import patch
 
 import chess
+import compression.zstd as zstd
 
 from backend.core import Core, classify_tactical_mistake, is_eligible_time_control
+from backend.import_puzzles import import_puzzles
 
 
 class CoreTests(TestCase):
@@ -119,6 +123,35 @@ class CoreTests(TestCase):
             popen.assert_called_once()
         with self.core._connect() as connection:
             self.assertEqual(connection.execute("SELECT COUNT(*) FROM games").fetchone()[0], 1)
+
+    def test_import_skips_invalid_later_move_and_continues(self):
+        source = Path(self.tempdir.name) / "puzzles.csv.zst"
+        database = Path(self.tempdir.name) / "imported-puzzles.db"
+        fen = chess.STARTING_FEN
+        rows = (
+            ("valid-before", fen, "e2e4 e7e5 g1f3", "1200", "fork"),
+            ("invalid-later", fen, "e2e4 e7e5 e2e3", "1200", "fork"),
+            ("valid-after", fen, "d2d4 d7d5 c2c4", "1200", "fork"),
+        )
+        csv_text = io.StringIO(newline="")
+        writer = csv.writer(csv_text)
+        writer.writerow(("PuzzleId", "FEN", "Moves", "Rating", "Themes"))
+        writer.writerows(rows)
+        with zstd.open(source, "wt", encoding="utf-8", newline="") as stream:
+            stream.write(csv_text.getvalue())
+
+        self.assertEqual(import_puzzles(source, database), 2)
+        with closing(sqlite3.connect(database)) as connection:
+            imported = connection.execute(
+                "SELECT puzzle_id, fen, moves FROM puzzles ORDER BY puzzle_id"
+            ).fetchall()
+        self.assertEqual(
+            imported,
+            [
+                ("valid-after", fen, "d2d4 d7d5 c2c4"),
+                ("valid-before", fen, "e2e4 e7e5 g1f3"),
+            ],
+        )
 
     def test_supported_tactical_classification_and_uncertain_position(self):
         cases = (
