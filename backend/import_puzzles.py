@@ -3,6 +3,7 @@ import csv
 import sqlite3
 from pathlib import Path
 
+import chess
 import compression.zstd as zstd
 
 
@@ -56,6 +57,15 @@ def import_puzzles(source: Path, database: Path) -> int:
                     try:
                         rating = int(row.get("Rating"))
                     except (TypeError, ValueError):
+                        continue
+                    try:
+                        board = chess.Board(fen)
+                        for move_uci in moves.split():
+                            move = chess.Move.from_uci(move_uci)
+                            if not board.is_legal(move):
+                                raise ValueError(f"illegal move: {move_uci}")
+                            board.push(move)
+                    except (ValueError, chess.InvalidMoveError):
                         continue
 
                     batch.append(
