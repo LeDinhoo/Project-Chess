@@ -23,6 +23,12 @@ Current implementation state:
 - [ ] Step 11 — minimal shadcn utilities/components actually used (deferred)
 - [ ] Step 12 — Chessground integration (next)
 
+Audit status: complete.
+
+- Lichess importer validation correction: `b249550a37494e650d9510ff11d8a9b5f737a31f`;
+- focused importer regression coverage: `b1df31fc56b51ab957e518ef57db581f3d2eadcc`;
+- backend regression suite: 12 tests.
+
 ---
 
 # Product goal
@@ -637,7 +643,10 @@ Responsibilities:
 - filter supported tactical themes;
 - exclude promotion-related themes;
 - inspect actual UCI moves and exclude promotion moves;
+- validate the complete FEN + UCI move sequence before storage;
+- skip rows with malformed FEN, malformed UCI, or illegal moves anywhere in the sequence;
 - exclude `mateIn1`;
+- preserve original valid FEN and Moves strings unchanged;
 - write required fields into `puzzles.db`;
 - batch inserts;
 - create only required indexes.
@@ -699,10 +708,13 @@ Required areas:
 - SRS intervals 1/3/7/14/30;
 - failed first attempt remains failed after retry;
 - Lichess FEN/move payload transformation.
+- importer skips a valid setup move followed by an invalid later move and continues importing;
 
 Use temporary SQLite databases.
 
 No testing dependency.
+
+Current regression suite: 12 tests.
 
 ---
 
