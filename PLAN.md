@@ -16,8 +16,8 @@ Current implementation state:
 - [x] Step 4 — `backend/import_puzzles.py`
 - [x] Step 5 — `backend/core.py`
 - [x] Step 6 — `backend/test_core.py`
-- [ ] Step 7 — `backend/app.py`
-- [ ] Step 8 — frontend bootstrap
+- [x] Step 7 — `backend/app.py`
+- [x] Step 8 — frontend bootstrap
 - [ ] Step 9+ — frontend configuration and MVP UI
 
 ---
@@ -721,7 +721,7 @@ Do not duplicate domain logic.
 
 ## Step 8 — frontend bootstrap
 
-Status: next implementation step.
+Status: approved and committed.
 
 Use the official SvelteKit bootstrap.
 
@@ -743,6 +743,8 @@ Get approval first.
 ---
 
 ## Step 9+ — frontend configuration and UI
+
+Status: next implementation step.
 
 Each manually modified file receives its own review gate.
 
