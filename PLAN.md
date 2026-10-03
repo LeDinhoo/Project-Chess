@@ -18,7 +18,8 @@ Current implementation state:
 - [x] Step 6 — `backend/test_core.py`
 - [x] Step 7 — `backend/app.py`
 - [x] Step 8 — frontend bootstrap
-- [ ] Step 9+ — frontend configuration and MVP UI
+- [x] Step 9 — `frontend/vite.config.ts` Vite development proxy
+- [ ] Step 10 — Tailwind setup
 
 ---
 
@@ -742,7 +743,23 @@ Get approval first.
 
 ---
 
-## Step 9+ — frontend configuration and UI
+## Step 9 — `frontend/vite.config.ts` — Vite development proxy
+
+Status: approved and committed.
+
+Purpose:
+
+Configure the Vite development server proxy for the backend API.
+
+Behavior:
+
+`/api` → `http://localhost:8000`
+
+Use Vite's native `server.proxy` configuration while preserving the generated SvelteKit/Vite configuration.
+
+---
+
+## Step 10 — Tailwind setup
 
 Status: next implementation step.
 
@@ -752,11 +769,11 @@ Expected sequence, adjusted only if the generated project proves a file unnecess
 
 1. frontend dependency configuration;
 2. npm lockfile;
-3. Vite configuration;
-4. Tailwind setup;
-5. minimal shadcn utilities/components actually used;
-6. Chessground integration;
-7. one MVP `+page.svelte`.
+3. Vite configuration (Step 9 — completed);
+4. Tailwind setup (Step 10 — next);
+5. minimal shadcn utilities/components actually used (Step 11);
+6. Chessground integration (Step 12);
+7. one MVP `+page.svelte` (Step 13).
 
 Frontend requirements:
 
