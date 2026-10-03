@@ -928,9 +928,12 @@ Validation completed before commit:
 - `git diff --check` passed;
 - only `frontend/src/routes/+page.svelte` was committed.
 
-Runtime limitation:
+Runtime validation:
 
-- real backend puzzle-flow browser smoke remains unverified because `config.json`, `puzzles.db`, and a running backend process are unavailable locally.
+- Gate 2 success path verified end-to-end: real Chess.com Sync succeeded with 20 eligible/imported games and 38 mistakes; a 20-puzzle daily session loaded; real puzzle interaction and opponent auto-move worked; timer/result persistence worked; reload/reopen preserved the result (`1/20 recorded`).
+- Runtime testing used a temporary untracked Vite proxy to FastAPI on port `8001` because an unidentified Node process occupies port `8000`.
+- The temporary config was deleted, tracked `frontend/vite.config.ts` remains unchanged, the port-8000 process was not terminated, and the repository source remained clean.
+- The failure/retry path is implemented but has not yet been exercised end-to-end.
 
 Gate 3 was not started.
 
