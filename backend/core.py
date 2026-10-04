@@ -533,12 +533,18 @@ class Core:
             unfinished_ids = [
                 row["puzzle_id"]
                 for row in connection.execute(
-                    "SELECT session_puzzles.puzzle_id FROM session_puzzles "
+                    "WITH latest_occurrences AS ("
+                    "SELECT session_puzzles.puzzle_id, session_puzzles.result, "
+                    "sessions.session_date, sessions.session_id, session_puzzles.position, "
+                    "ROW_NUMBER() OVER (PARTITION BY session_puzzles.puzzle_id "
+                    "ORDER BY sessions.session_date DESC, sessions.session_id DESC, "
+                    "session_puzzles.position DESC) AS occurrence_rank "
+                    "FROM session_puzzles "
                     "JOIN sessions ON sessions.session_id = session_puzzles.session_id "
-                    "WHERE sessions.session_date < ? AND session_puzzles.result IS NULL "
-                    "GROUP BY session_puzzles.puzzle_id "
-                    "ORDER BY MIN(sessions.session_date), MIN(sessions.session_id), "
-                    "MIN(session_puzzles.position) LIMIT ?",
+                    "WHERE sessions.session_date < ?"
+                    ") SELECT puzzle_id FROM latest_occurrences "
+                    "WHERE occurrence_rank = 1 AND result IS NULL "
+                    "ORDER BY session_date, session_id, position LIMIT ?",
                     (session_date, remaining),
                 )
             ]
