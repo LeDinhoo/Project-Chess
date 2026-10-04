@@ -550,10 +550,19 @@ class Core:
                     moves = (puzzle["moves"] or "").split()
                     if len(moves) < 2:
                         raise ValueError("expected at least two moves")
-                    move = chess.Move.from_uci(moves[0])
-                    if not board.is_legal(move):
-                        raise ValueError(f"illegal first move: {moves[0]}")
-                    board.push(move)
+                    setup_move = chess.Move.from_uci(moves[0])
+                    if not board.is_legal(setup_move):
+                        raise ValueError(f"illegal move: {moves[0]}")
+                    board.push(setup_move)
+                    display_fen = board.fen()
+                    legal_moves = []
+                    for index, token in enumerate(moves[1:], 1):
+                        move = chess.Move.from_uci(token)
+                        if index % 2 == 1:
+                            legal_moves.append([legal.uci() for legal in board.legal_moves])
+                        if not board.is_legal(move):
+                            raise ValueError(f"illegal move: {token}")
+                        board.push(move)
                 except (AttributeError, IndexError, TypeError, ValueError) as exc:
                     raise RuntimeError(
                         f"invalid puzzle data for {puzzle['puzzle_id']}: {exc}"
@@ -562,8 +571,10 @@ class Core:
                     {
                         "position": row["position"],
                         "puzzle_id": puzzle["puzzle_id"],
-                        "fen": board.fen(),
+                        "fen": display_fen,
                         "moves": " ".join(moves[1:]),
+                        "last_move": moves[0],
+                        "legal_moves": legal_moves,
                         "rating": puzzle["rating"],
                         "themes": puzzle["themes"],
                         "result": row["result"],
