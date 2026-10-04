@@ -66,7 +66,9 @@
 	);
 	let recordedCount = $derived(currentSession?.puzzles.filter((puzzle) => puzzle.result !== null).length ?? 0);
 	let sessionComplete = $state(false);
-	let replayMode = $state(false);
+	let reviewMode = $state(false);
+	let reviewQueue = $state<number[]>([]);
+	let reviewComplete = $state(false);
 	let solutionIndex = $state(0);
 	let attemptStartedAt = $state<number | undefined>(undefined);
 	let displayElapsedMs = $state(0);
@@ -182,7 +184,7 @@
 		success: boolean,
 		elapsedMs: number
 	): Promise<SavedResult | null> {
-		if (replayMode || savingResult) return null;
+		if (reviewMode || savingResult) return null;
 		savingResult = true;
 		resultSaveError = '';
 		try {
@@ -253,7 +255,7 @@
 		ground?.stop();
 
 		if (attemptFailed) {
-			feedback = replayMode
+			feedback = reviewMode
 				? 'Solved on retry'
 				: failurePersisted
 				? 'Solved on retry — first attempt recorded as failed.'
@@ -264,7 +266,7 @@
 		}
 
 		feedback = 'Solved';
-		if (replayMode) return;
+		if (reviewMode) return;
 		void saveResult(session.date, puzzle.position, true, elapsedMs).then((saved) => {
 			if (saved?.result === 'failed') {
 				feedback = 'Solved, but this puzzle was already recorded as failed.';
@@ -281,7 +283,7 @@
 
 	function handleUserMove(orig: Square, dest: Square) {
 		const puzzle = currentPuzzle;
-		if (!puzzle || puzzleSolved || (!replayMode && puzzle.result !== null && !attemptFailed)) return;
+		if (!puzzle || puzzleSolved || (!reviewMode && puzzle.result !== null && !attemptFailed)) return;
 
 		const moves = puzzleMoves(puzzle);
 		const expected = moves[solutionIndex];
@@ -293,7 +295,7 @@
 				stopTimer();
 				displayElapsedMs = elapsedMs;
 				const date = currentSession?.date;
-				if (!replayMode && date) {
+				if (!reviewMode && date) {
 					void saveResult(date, puzzle.position, false, elapsedMs).then((saved) => {
 						if (saved?.result === 'failed') {
 							failurePersisted = true;
@@ -383,10 +385,10 @@
 	function activatePuzzle(puzzle: SessionPuzzle | undefined) {
 		stopTimer();
 		solutionIndex = 0;
-		attemptFailed = !replayMode && puzzle?.result === 'failed';
-		failurePersisted = !replayMode && puzzle?.result === 'failed';
-		puzzleSolved = !replayMode && puzzle?.result !== null && puzzle?.result !== undefined;
-		displayElapsedMs = replayMode ? 0 : (puzzle?.elapsed_ms ?? 0);
+		attemptFailed = !reviewMode && puzzle?.result === 'failed';
+		failurePersisted = !reviewMode && puzzle?.result === 'failed';
+		puzzleSolved = !reviewMode && puzzle?.result !== null && puzzle?.result !== undefined;
+		displayElapsedMs = reviewMode ? 0 : (puzzle?.elapsed_ms ?? 0);
 		feedback = '';
 		resultSaveError = '';
 
@@ -394,7 +396,7 @@
 			ground?.stop();
 			return;
 		}
-		if (!replayMode && puzzle.result !== null) {
+		if (!reviewMode && puzzle.result !== null) {
 			configureBoard(puzzle, false);
 			feedback =
 				puzzle.result === 'success' ? 'Solved — result already recorded' : 'Failed — result already recorded';
@@ -409,7 +411,7 @@
 
 	function enterSessionComplete() {
 		sessionComplete = true;
-		replayMode = false;
+		reviewMode = false;
 		stopTimer();
 		solutionIndex = 0;
 		attemptFailed = false;
@@ -423,7 +425,9 @@
 
 	function activateSession(session: SessionPayload) {
 		currentSession = session;
-		replayMode = false;
+		reviewMode = false;
+		reviewQueue = [];
+		reviewComplete = false;
 		const firstUnfinished = session.puzzles.findIndex((puzzle) => puzzle.result === null);
 		const index = firstUnfinished === -1 ? Math.max(session.puzzles.length - 1, 0) : firstUnfinished;
 		currentIndex = index;
@@ -435,13 +439,19 @@
 		activatePuzzle(session.puzzles[index]);
 	}
 
-	function startReplay() {
+	function startReview() {
 		const session = currentSession;
 		if (!session?.puzzles.length) return;
-		replayMode = true;
+		reviewQueue = session.puzzles.reduce<number[]>((queue, puzzle, index) => {
+			if (puzzle.result === 'failed') queue.push(index);
+			return queue;
+		}, []);
+		if (!reviewQueue.length) return;
+		reviewMode = true;
+		reviewComplete = false;
 		sessionComplete = false;
-		currentIndex = 0;
-		activatePuzzle(session.puzzles[0]);
+		currentIndex = reviewQueue[0];
+		activatePuzzle(session.puzzles[currentIndex]);
 	}
 
 	async function nextPuzzle() {
@@ -452,16 +462,24 @@
 			!session ||
 			!puzzle ||
 			!puzzleSolved ||
-			(!replayMode && puzzle.result === null)
+			(!reviewMode && puzzle.result === null)
 		)
 			return;
 
-		const nextIndex = replayMode
-			? currentIndex + 1
-			: session.puzzles.findIndex(
-					(candidate, index) => index > currentIndex && candidate.result === null
-				);
+		let nextIndex: number;
+		if (reviewMode) {
+			reviewQueue = reviewQueue.filter((index) => index !== currentIndex);
+			nextIndex = reviewQueue[0] ?? -1;
+		} else {
+			nextIndex = session.puzzles.findIndex(
+				(candidate, index) => index > currentIndex && candidate.result === null
+			);
+		}
 		if (nextIndex >= session.puzzles.length || nextIndex === -1) {
+			if (reviewMode) {
+				reviewComplete = true;
+				reviewQueue = [];
+			}
 			enterSessionComplete();
 		} else {
 			sessionComplete = false;
@@ -691,18 +709,27 @@
 					<div class="absolute inset-0 flex items-center justify-center p-2 sm:p-4" role="status">
 						<div class="w-full max-w-2xl space-y-6 border border-border bg-background p-6 text-center sm:p-10">
 							<div class="space-y-2">
-								<p class="text-xs font-semibold uppercase tracking-[0.2em] text-primary">Session complete</p>
-								<h3 class="text-3xl font-semibold tracking-tight">20-puzzle session complete</h3>
-								<p class="text-muted-foreground">Your recorded results are ready. Replay the same frozen series whenever you want.</p>
+								<p class="text-xs font-semibold uppercase tracking-[0.2em] text-primary">{reviewComplete ? 'Review complete' : 'Session complete'}</p>
+								<h3 class="text-3xl font-semibold tracking-tight">
+									{reviewComplete ? 'Review complete' : `${currentSession.puzzles.length}-puzzle session complete`}
+								</h3>
+								<p class="text-muted-foreground">
+									{reviewComplete ? 'All missed puzzles were corrected.' : 'Your recorded results are ready.'}
+								</p>
 							</div>
 							<div class="flex flex-wrap justify-center gap-x-6 gap-y-2 text-sm">
 								<span>{recordedSuccessCount} successful</span>
 								<span class="text-destructive">{recordedFailedCount} failed</span>
 								<span>{recordedCount}/{currentSession.puzzles.length} recorded</span>
 							</div>
-							<Button variant="secondary" size="lg" onclick={startReplay} disabled={savingResult}>
-								Replay session
-							</Button>
+							{#if recordedFailedCount > 0 && !reviewComplete}
+								<p class="text-sm text-muted-foreground">
+									{recordedFailedCount} {recordedFailedCount === 1 ? 'puzzle' : 'puzzles'} to review
+								</p>
+								<Button variant="secondary" size="lg" onclick={startReview} disabled={savingResult}>
+									Review mistakes
+								</Button>
+							{/if}
 						</div>
 					</div>
 				{/if}
