@@ -722,7 +722,7 @@ Use temporary SQLite databases.
 
 No testing dependency.
 
-Current regression suite: 12 tests.
+Current regression suite: 15 tests.
 
 ---
 
