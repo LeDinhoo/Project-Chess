@@ -58,8 +58,15 @@
 	let syncState = $state<'idle' | 'loading' | 'success' | 'error'>('idle');
 	let syncMessage = $state('');
 	let currentPuzzle = $derived(currentSession?.puzzles[currentIndex]);
+	let recordedSuccessCount = $derived(
+		currentSession?.puzzles.filter((puzzle) => puzzle.result === 'success').length ?? 0
+	);
+	let recordedFailedCount = $derived(
+		currentSession?.puzzles.filter((puzzle) => puzzle.result === 'failed').length ?? 0
+	);
 	let recordedCount = $derived(currentSession?.puzzles.filter((puzzle) => puzzle.result !== null).length ?? 0);
 	let sessionComplete = $state(false);
+	let replayMode = $state(false);
 	let solutionIndex = $state(0);
 	let attemptStartedAt = $state<number | undefined>(undefined);
 	let displayElapsedMs = $state(0);
@@ -175,7 +182,7 @@
 		success: boolean,
 		elapsedMs: number
 	): Promise<SavedResult | null> {
-		if (savingResult) return null;
+		if (replayMode || savingResult) return null;
 		savingResult = true;
 		resultSaveError = '';
 		try {
@@ -246,15 +253,18 @@
 		ground?.stop();
 
 		if (attemptFailed) {
-			feedback = failurePersisted
+			feedback = replayMode
+				? 'Solved on retry'
+				: failurePersisted
 				? 'Solved on retry — first attempt recorded as failed.'
 				: puzzle.result === 'success'
 					? 'Result was already recorded as successful.'
-				: 'Solved on retry — first attempt failed, but the result could not be saved.';
+					: 'Solved on retry — first attempt failed, but the result could not be saved.';
 			return;
 		}
 
 		feedback = 'Solved';
+		if (replayMode) return;
 		void saveResult(session.date, puzzle.position, true, elapsedMs).then((saved) => {
 			if (saved?.result === 'failed') {
 				feedback = 'Solved, but this puzzle was already recorded as failed.';
@@ -271,7 +281,7 @@
 
 	function handleUserMove(orig: Square, dest: Square) {
 		const puzzle = currentPuzzle;
-		if (!puzzle || puzzleSolved || (puzzle.result !== null && !attemptFailed)) return;
+		if (!puzzle || puzzleSolved || (!replayMode && puzzle.result !== null && !attemptFailed)) return;
 
 		const moves = puzzleMoves(puzzle);
 		const expected = moves[solutionIndex];
@@ -283,7 +293,7 @@
 				stopTimer();
 				displayElapsedMs = elapsedMs;
 				const date = currentSession?.date;
-				if (date) {
+				if (!replayMode && date) {
 					void saveResult(date, puzzle.position, false, elapsedMs).then((saved) => {
 						if (saved?.result === 'failed') {
 							failurePersisted = true;
@@ -373,10 +383,10 @@
 	function activatePuzzle(puzzle: SessionPuzzle | undefined) {
 		stopTimer();
 		solutionIndex = 0;
-		attemptFailed = puzzle?.result === 'failed';
-		failurePersisted = puzzle?.result === 'failed';
-		puzzleSolved = puzzle?.result !== null && puzzle?.result !== undefined;
-		displayElapsedMs = puzzle?.elapsed_ms ?? 0;
+		attemptFailed = !replayMode && puzzle?.result === 'failed';
+		failurePersisted = !replayMode && puzzle?.result === 'failed';
+		puzzleSolved = !replayMode && puzzle?.result !== null && puzzle?.result !== undefined;
+		displayElapsedMs = replayMode ? 0 : (puzzle?.elapsed_ms ?? 0);
 		feedback = '';
 		resultSaveError = '';
 
@@ -384,7 +394,7 @@
 			ground?.stop();
 			return;
 		}
-		if (puzzle.result !== null) {
+		if (!replayMode && puzzle.result !== null) {
 			configureBoard(puzzle, false);
 			feedback =
 				puzzle.result === 'success' ? 'Solved — result already recorded' : 'Failed — result already recorded';
@@ -397,8 +407,9 @@
 		startTimer();
 	}
 
-	function enterSessionComplete(displayPuzzle?: SessionPuzzle) {
+	function enterSessionComplete() {
 		sessionComplete = true;
+		replayMode = false;
 		stopTimer();
 		solutionIndex = 0;
 		attemptFailed = false;
@@ -407,32 +418,50 @@
 		displayElapsedMs = 0;
 		feedback = '';
 		resultSaveError = '';
-		if (displayPuzzle) configureBoard(displayPuzzle, false);
-		else ground?.stop();
+		ground?.stop();
 	}
 
 	function activateSession(session: SessionPayload) {
 		currentSession = session;
+		replayMode = false;
 		const firstUnfinished = session.puzzles.findIndex((puzzle) => puzzle.result === null);
 		const index = firstUnfinished === -1 ? Math.max(session.puzzles.length - 1, 0) : firstUnfinished;
 		currentIndex = index;
 		if (firstUnfinished === -1) {
-			enterSessionComplete(session.puzzles[index]);
+			enterSessionComplete();
 			return;
 		}
 		sessionComplete = false;
 		activatePuzzle(session.puzzles[index]);
 	}
 
+	function startReplay() {
+		const session = currentSession;
+		if (!session?.puzzles.length) return;
+		replayMode = true;
+		sessionComplete = false;
+		currentIndex = 0;
+		activatePuzzle(session.puzzles[0]);
+	}
+
 	async function nextPuzzle() {
 		const session = currentSession;
 		const puzzle = currentPuzzle;
-		if (savingResult || !session || !puzzle || !puzzleSolved || puzzle.result === null) return;
+		if (
+			savingResult ||
+			!session ||
+			!puzzle ||
+			!puzzleSolved ||
+			(!replayMode && puzzle.result === null)
+		)
+			return;
 
-		const nextIndex = session.puzzles.findIndex(
-			(candidate, index) => index > currentIndex && candidate.result === null
-		);
-		if (nextIndex === -1) {
+		const nextIndex = replayMode
+			? currentIndex + 1
+			: session.puzzles.findIndex(
+					(candidate, index) => index > currentIndex && candidate.result === null
+				);
+		if (nextIndex >= session.puzzles.length || nextIndex === -1) {
 			enterSessionComplete();
 		} else {
 			sessionComplete = false;
@@ -627,6 +656,8 @@
 							{#if resultSaveError}
 								<span class="text-destructive" role="alert">{resultSaveError}</span>
 							{/if}
+							<span>{recordedSuccessCount} successful</span>
+							<span class="text-destructive">{recordedFailedCount} failed</span>
 							<span>{recordedCount}/{currentSession.puzzles.length} recorded</span>
 							<span>Rating: {currentPuzzle.rating}</span>
 							<span>Themes: {currentPuzzle.themes}</span>
@@ -650,8 +681,31 @@
 				</div>
 			{/if}
 
-			<div class="flex min-h-0 flex-1 items-center justify-center bg-muted p-2 sm:p-4">
-				<div class="board aspect-square w-[min(86vh,100%)] max-w-full" bind:this={boardElement}></div>
+			<div class="relative flex min-h-0 flex-1 items-center justify-center bg-muted p-2 sm:p-4">
+				<div
+					class="board aspect-square w-[min(86vh,100%)] max-w-full"
+					class:invisible={sessionComplete}
+					bind:this={boardElement}
+				></div>
+				{#if sessionComplete && currentSession}
+					<div class="absolute inset-0 flex items-center justify-center p-2 sm:p-4" role="status">
+						<div class="w-full max-w-2xl space-y-6 border border-border bg-background p-6 text-center sm:p-10">
+							<div class="space-y-2">
+								<p class="text-xs font-semibold uppercase tracking-[0.2em] text-primary">Session complete</p>
+								<h3 class="text-3xl font-semibold tracking-tight">20-puzzle session complete</h3>
+								<p class="text-muted-foreground">Your recorded results are ready. Replay the same frozen series whenever you want.</p>
+							</div>
+							<div class="flex flex-wrap justify-center gap-x-6 gap-y-2 text-sm">
+								<span>{recordedSuccessCount} successful</span>
+								<span class="text-destructive">{recordedFailedCount} failed</span>
+								<span>{recordedCount}/{currentSession.puzzles.length} recorded</span>
+							</div>
+							<Button variant="secondary" size="lg" onclick={startReplay} disabled={savingResult}>
+								Replay session
+							</Button>
+						</div>
+					</div>
+				{/if}
 			</div>
 		</section>
 	</div>
