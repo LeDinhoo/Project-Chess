@@ -25,6 +25,24 @@ Do not assume approval.
 
 If a change unexpectedly requires another file, stop before modifying it and explain why.
 
+## Browser validation
+
+Browser/UI validation is always manual and performed by the user.
+
+Luna/Codex must never launch, open, control, automate, or otherwise drive a browser for validation, including through Playwright, a cloud browser, or any browser/computer-control tool.
+
+When browser validation is required, the agent must:
+
+1. complete all available non-browser validation;
+2. clearly tell the user that manual browser testing is required;
+3. list the exact manual test steps and expected outcomes;
+4. state that browser validation remains pending;
+5. stop and wait for the user's test results before treating that validation as passed or committing a gate that requires browser validation.
+
+Non-browser validation remains allowed, including npm checks/builds, unit tests, API checks, and starting backend/frontend processes when needed.
+
+Never claim a browser smoke test passed unless the user explicitly reports that it passed.
+
 ## Scope
 
 Prefer:
