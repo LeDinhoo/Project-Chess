@@ -34,7 +34,7 @@ Step 13 Gates 1, 2, and 3 are complete and user-approved.
 
 - Lichess importer validation correction: `b249550a37494e650d9510ff11d8a9b5f737a31f`;
 - focused importer regression coverage: `b1df31fc56b51ab957e518ef57db581f3d2eadcc`;
-- backend regression suite: 12 tests.
+- backend regression suite: 15 tests.
 
 ---
 
