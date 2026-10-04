@@ -239,6 +239,42 @@ class CoreTests(TestCase):
             ).fetchone()
         self.assertEqual((old["puzzle_id"], old["result"]), (puzzle_ids[0], None))
 
+    def test_latest_occurrence_controls_unfinished_carry_over(self):
+        carry_over_ids = ["puzzle-a", "puzzle-b", "puzzle-c", "puzzle-d"]
+        filler_ids = [f"filler-{number:02d}" for number in range(19)]
+        self._add_puzzles(carry_over_ids, themes="other")
+        self._add_puzzles(filler_ids)
+        occurrences = (
+            ("2026-01-01", "puzzle-a", None),
+            ("2026-01-02", "puzzle-a", "success"),
+            ("2026-01-02", "puzzle-c", None),
+            ("2026-01-02", "puzzle-c", "success"),
+            ("2026-01-03", "puzzle-b", "success"),
+            ("2026-01-04", "puzzle-b", None),
+            ("2026-01-05", "puzzle-d", None),
+        )
+        for session_date, puzzle_id, result in occurrences:
+            session_id = self._add_session(session_date, [puzzle_id])
+            if result is not None:
+                with self.core._connect() as connection:
+                    connection.execute(
+                        "UPDATE session_puzzles SET result = ? WHERE session_id = ? AND position = 1",
+                        (result, session_id),
+                    )
+
+        self._add_weakness()
+        with self.core._connect() as connection:
+            selected_ids = [
+                row["puzzle_id"] for row in self.core._select_puzzles(connection, "2026-01-05")
+            ]
+
+        self.assertEqual(selected_ids[0], "puzzle-b")
+        self.assertIn("puzzle-b", selected_ids)
+        self.assertNotIn("puzzle-a", selected_ids)
+        self.assertNotIn("puzzle-c", selected_ids)
+        self.assertNotIn("puzzle-d", selected_ids)
+        self.assertEqual(len(selected_ids), 20)
+
     def test_due_puzzles_have_priority_without_overlap(self):
         puzzle_ids = [f"puzzle-{number:02d}" for number in range(20)]
         self._add_puzzles(puzzle_ids)
