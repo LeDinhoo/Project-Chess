@@ -504,6 +504,15 @@ class Core:
                     "SELECT puzzle_id FROM puzzle_progress UNION SELECT puzzle_id FROM session_puzzles"
                 )
             }
+            same_day_ids = {
+                row["puzzle_id"]
+                for row in connection.execute(
+                    "SELECT session_puzzles.puzzle_id FROM session_puzzles "
+                    "JOIN sessions ON sessions.session_id = session_puzzles.session_id "
+                    "WHERE sessions.session_date = ?",
+                    (session_date,),
+                )
+            }
             recent_ids = {
                 row["puzzle_id"]
                 for row in connection.execute(
@@ -519,7 +528,11 @@ class Core:
             selected_ids: set[str] = set()
 
             def add(row: sqlite3.Row | None) -> None:
-                if row is not None and row["puzzle_id"] not in selected_ids:
+                if (
+                    row is not None
+                    and row["puzzle_id"] not in same_day_ids
+                    and row["puzzle_id"] not in selected_ids
+                ):
                     selected.append(row)
                     selected_ids.add(row["puzzle_id"])
 
