@@ -275,7 +275,7 @@ class Core:
     def initialize(self) -> None:
         self.app_db_path.parent.mkdir(parents=True, exist_ok=True)
         with self._connect() as connection:
-            connection.executescript(
+            connection.execute(
                 """
                 CREATE TABLE IF NOT EXISTS games (
                     game_id TEXT PRIMARY KEY,
@@ -286,7 +286,11 @@ class Core:
                     result TEXT NOT NULL,
                     time_control TEXT NOT NULL,
                     user_rating INTEGER
-                );
+                )
+                """
+            )
+            connection.execute(
+                """
                 CREATE TABLE IF NOT EXISTS mistakes (
                     id INTEGER PRIMARY KEY,
                     game_id TEXT NOT NULL REFERENCES games(game_id) ON DELETE CASCADE,
@@ -295,28 +299,100 @@ class Core:
                     theme TEXT NOT NULL,
                     loss_cp INTEGER NOT NULL,
                     UNIQUE(game_id, ply)
-                );
-                CREATE TABLE IF NOT EXISTS sessions (
-                    session_date TEXT PRIMARY KEY,
-                    created_at TEXT NOT NULL
-                );
-                CREATE TABLE IF NOT EXISTS session_puzzles (
-                    session_date TEXT NOT NULL REFERENCES sessions(session_date) ON DELETE CASCADE,
-                    position INTEGER NOT NULL,
-                    puzzle_id TEXT NOT NULL,
-                    result TEXT CHECK(result IN ('success', 'failed') OR result IS NULL),
-                    elapsed_ms INTEGER,
-                    PRIMARY KEY(session_date, position)
-                );
+                )
+                """
+            )
+            connection.execute(
+                """
                 CREATE TABLE IF NOT EXISTS puzzle_progress (
                     puzzle_id TEXT PRIMARY KEY,
                     success_count INTEGER NOT NULL DEFAULT 0,
                     due_date TEXT NOT NULL,
                     last_result TEXT CHECK(last_result IN ('success', 'failed') OR last_result IS NULL),
                     last_elapsed_ms INTEGER
-                );
+                )
                 """
             )
+
+            sessions_info = connection.execute("PRAGMA table_info(sessions)").fetchall()
+            session_puzzles_info = connection.execute("PRAGMA table_info(session_puzzles)").fetchall()
+            if not sessions_info and not session_puzzles_info:
+                self._create_session_tables(connection)
+            elif "session_id" not in {row["name"] for row in sessions_info}:
+                self._migrate_session_tables(connection)
+            elif "session_id" not in {row["name"] for row in session_puzzles_info}:
+                raise RuntimeError("incomplete session schema")
+
+    @staticmethod
+    def _create_session_tables(connection: sqlite3.Connection) -> None:
+        connection.execute(
+            """
+            CREATE TABLE IF NOT EXISTS sessions (
+                session_id INTEGER PRIMARY KEY,
+                session_date TEXT NOT NULL,
+                created_at TEXT NOT NULL
+            )
+            """
+        )
+        connection.execute(
+            """
+            CREATE TABLE IF NOT EXISTS session_puzzles (
+                session_id INTEGER NOT NULL REFERENCES sessions(session_id) ON DELETE CASCADE,
+                position INTEGER NOT NULL,
+                puzzle_id TEXT NOT NULL,
+                result TEXT CHECK(result IN ('success', 'failed') OR result IS NULL),
+                elapsed_ms INTEGER,
+                PRIMARY KEY(session_id, position)
+            )
+            """
+        )
+
+    def _migrate_session_tables(self, connection: sqlite3.Connection) -> None:
+        legacy_sessions = {row["name"] for row in connection.execute("PRAGMA table_info(sessions)")}
+        legacy_puzzles = {row["name"] for row in connection.execute("PRAGMA table_info(session_puzzles)")}
+        if not {"session_date", "created_at"}.issubset(legacy_sessions) or not {
+            "session_date",
+            "position",
+            "puzzle_id",
+            "result",
+            "elapsed_ms",
+        }.issubset(legacy_puzzles):
+            raise RuntimeError("unsupported legacy session schema")
+
+        connection.execute("PRAGMA foreign_keys = OFF")
+        try:
+            connection.execute("BEGIN")
+            connection.execute("ALTER TABLE session_puzzles RENAME TO session_puzzles_legacy")
+            connection.execute("ALTER TABLE sessions RENAME TO sessions_legacy")
+            self._create_session_tables(connection)
+            connection.execute(
+                "INSERT INTO sessions(session_date, created_at) "
+                "SELECT session_date, created_at FROM sessions_legacy ORDER BY rowid"
+            )
+            legacy_puzzle_count = connection.execute(
+                "SELECT COUNT(*) FROM session_puzzles_legacy"
+            ).fetchone()[0]
+            connection.execute(
+                """
+                INSERT INTO session_puzzles(session_id, position, puzzle_id, result, elapsed_ms)
+                SELECT sessions.session_id, legacy.position, legacy.puzzle_id, legacy.result, legacy.elapsed_ms
+                FROM session_puzzles_legacy AS legacy
+                JOIN sessions ON sessions.session_date = legacy.session_date
+                """
+            )
+            migrated_puzzle_count = connection.execute(
+                "SELECT COUNT(*) FROM session_puzzles"
+            ).fetchone()[0]
+            if migrated_puzzle_count != legacy_puzzle_count:
+                raise RuntimeError("legacy session puzzle rows could not be preserved")
+            connection.execute("DROP TABLE session_puzzles_legacy")
+            connection.execute("DROP TABLE sessions_legacy")
+            connection.commit()
+        except Exception:
+            connection.rollback()
+            raise
+        finally:
+            connection.execute("PRAGMA foreign_keys = ON")
 
     def sync(self) -> dict[str, int]:
         config = _config(self.config_path)
@@ -431,8 +507,11 @@ class Core:
             recent_ids = {
                 row["puzzle_id"]
                 for row in connection.execute(
-                    "SELECT puzzle_id FROM session_puzzles WHERE session_date < ? "
-                    "ORDER BY session_date DESC, position LIMIT 20",
+                    "SELECT session_puzzles.puzzle_id FROM session_puzzles "
+                    "JOIN sessions ON sessions.session_id = session_puzzles.session_id "
+                    "WHERE sessions.session_date < ? "
+                    "ORDER BY sessions.session_date DESC, sessions.session_id DESC, "
+                    "session_puzzles.position LIMIT 20",
                     (session_date,),
                 )
             }
@@ -454,9 +533,12 @@ class Core:
             unfinished_ids = [
                 row["puzzle_id"]
                 for row in connection.execute(
-                    "SELECT puzzle_id FROM session_puzzles "
-                    "WHERE session_date < ? AND result IS NULL "
-                    "GROUP BY puzzle_id ORDER BY MIN(session_date), MIN(position) LIMIT ?",
+                    "SELECT session_puzzles.puzzle_id FROM session_puzzles "
+                    "JOIN sessions ON sessions.session_id = session_puzzles.session_id "
+                    "WHERE sessions.session_date < ? AND session_puzzles.result IS NULL "
+                    "GROUP BY session_puzzles.puzzle_id "
+                    "ORDER BY MIN(sessions.session_date), MIN(sessions.session_id), "
+                    "MIN(session_puzzles.position) LIMIT ?",
                     (session_date, remaining),
                 )
             ]
@@ -525,11 +607,13 @@ class Core:
         finally:
             puzzle_connection.close()
 
-    def _session_payload(self, connection: sqlite3.Connection, session_date: str) -> dict[str, Any] | None:
+    def _session_payload(self, connection: sqlite3.Connection, session_id: int) -> dict[str, Any] | None:
         rows = connection.execute(
-            "SELECT position, puzzle_id, result, elapsed_ms FROM session_puzzles "
-            "WHERE session_date = ? ORDER BY position",
-            (session_date,),
+            "SELECT sessions.session_id, sessions.session_date, session_puzzles.position, "
+            "session_puzzles.puzzle_id, session_puzzles.result, session_puzzles.elapsed_ms "
+            "FROM session_puzzles JOIN sessions ON sessions.session_id = session_puzzles.session_id "
+            "WHERE sessions.session_id = ? ORDER BY session_puzzles.position",
+            (session_id,),
         ).fetchall()
         if not rows:
             return None
@@ -589,7 +673,8 @@ class Core:
                     }
                 )
             return {
-                "date": session_date,
+                "session_id": session_id,
+                "date": rows[0]["session_date"],
                 "puzzles": puzzles,
                 "completed": sum(puzzle["result"] is not None for puzzle in puzzles),
             }
@@ -599,54 +684,74 @@ class Core:
     def start_session(self, session_date: str | None = None) -> dict[str, Any]:
         session_date = _valid_date(session_date)
         with self._connect() as connection:
-            if connection.execute(
-                "SELECT 1 FROM sessions WHERE session_date = ?", (session_date,)
-            ).fetchone():
-                payload = self._session_payload(connection, session_date)
+            row = connection.execute(
+                "SELECT session_id FROM sessions WHERE session_date = ? "
+                "ORDER BY session_id DESC LIMIT 1",
+                (session_date,),
+            ).fetchone()
+            if row:
+                payload = self._session_payload(connection, row["session_id"])
                 if payload is not None:
                     return payload
+                raise RuntimeError("session has no puzzles")
+            return self._create_session(connection, session_date)
 
-            selected = self._select_puzzles(connection, session_date)
-            if len(selected) < 20:
-                raise RuntimeError("fewer than 20 matching puzzles are available")
-            connection.execute(
-                "INSERT INTO sessions(session_date, created_at) VALUES (?, ?)",
-                (session_date, date.today().isoformat()),
-            )
-            connection.executemany(
-                "INSERT INTO session_puzzles(session_date, position, puzzle_id) VALUES (?, ?, ?)",
-                [(session_date, position, row["puzzle_id"]) for position, row in enumerate(selected, 1)],
-            )
-            return self._session_payload(connection, session_date)  # type: ignore[return-value]
+    def create_session(self) -> dict[str, Any]:
+        session_date = date.today().isoformat()
+        with self._connect() as connection:
+            return self._create_session(connection, session_date)
+
+    def _create_session(self, connection: sqlite3.Connection, session_date: str) -> dict[str, Any]:
+        selected = self._select_puzzles(connection, session_date)
+        if len(selected) < 20:
+            raise RuntimeError("fewer than 20 matching puzzles are available")
+        cursor = connection.execute(
+            "INSERT INTO sessions(session_date, created_at) VALUES (?, ?)",
+            (session_date, date.today().isoformat()),
+        )
+        session_id = cursor.lastrowid
+        connection.executemany(
+            "INSERT INTO session_puzzles(session_id, position, puzzle_id) VALUES (?, ?, ?)",
+            [(session_id, position, row["puzzle_id"]) for position, row in enumerate(selected, 1)],
+        )
+        return self._session_payload(connection, session_id)  # type: ignore[return-value]
 
     def list_sessions(self) -> list[dict[str, Any]]:
         with self._connect() as connection:
             return [
                 {
+                    "session_id": row["session_id"],
                     "date": row["session_date"],
                     "completed": row["completed"],
+                    "successes": row["successes"],
+                    "failures": row["failures"],
                     "total": row["total"],
                 }
                 for row in connection.execute(
-                    "SELECT session_date, "
-                    "SUM(result IS NOT NULL) AS completed, COUNT(*) AS total "
-                    "FROM session_puzzles GROUP BY session_date ORDER BY session_date DESC"
+                    "SELECT sessions.session_id, sessions.session_date, "
+                    "SUM(session_puzzles.result IS NOT NULL) AS completed, "
+                    "SUM(CASE WHEN session_puzzles.result = 'success' THEN 1 ELSE 0 END) AS successes, "
+                    "SUM(CASE WHEN session_puzzles.result = 'failed' THEN 1 ELSE 0 END) AS failures, "
+                    "COUNT(*) AS total "
+                    "FROM session_puzzles JOIN sessions ON sessions.session_id = session_puzzles.session_id "
+                    "GROUP BY sessions.session_id, sessions.session_date "
+                    "ORDER BY sessions.session_date DESC, sessions.session_id DESC"
                 )
             ]
 
-    def get_session(self, session_date: str) -> dict[str, Any] | None:
-        session_date = _valid_date(session_date)
+    def get_session(self, session_id: int) -> dict[str, Any] | None:
+        session_id = _valid_session_id(session_id)
         with self._connect() as connection:
-            return self._session_payload(connection, session_date)
+            return self._session_payload(connection, session_id)
 
     def record_result(
         self,
-        session_date: str,
+        session_id: int,
         position: int,
         success: bool,
         elapsed_ms: int | float,
     ) -> dict[str, Any]:
-        session_date = _valid_date(session_date)
+        session_id = _valid_session_id(session_id)
         if not isinstance(position, int) or position < 1:
             raise ValueError("position must be a positive integer")
         if not isinstance(success, bool):
@@ -660,15 +765,18 @@ class Core:
 
         with self._connect() as connection:
             row = connection.execute(
-                "SELECT puzzle_id, result, elapsed_ms FROM session_puzzles "
-                "WHERE session_date = ? AND position = ?",
-                (session_date, position),
+                "SELECT session_puzzles.puzzle_id, session_puzzles.result, session_puzzles.elapsed_ms, "
+                "sessions.session_date FROM session_puzzles "
+                "JOIN sessions ON sessions.session_id = session_puzzles.session_id "
+                "WHERE session_puzzles.session_id = ? AND session_puzzles.position = ?",
+                (session_id, position),
             ).fetchone()
             if row is None:
                 raise ValueError("session puzzle does not exist")
             if row["result"] is not None:
                 return {
-                    "date": session_date,
+                    "session_id": session_id,
+                    "date": row["session_date"],
                     "position": position,
                     "result": row["result"],
                     "elapsed_ms": row["elapsed_ms"],
@@ -677,8 +785,8 @@ class Core:
             result = "success" if success else "failed"
             connection.execute(
                 "UPDATE session_puzzles SET result = ?, elapsed_ms = ? "
-                "WHERE session_date = ? AND position = ?",
-                (result, elapsed_ms, session_date, position),
+                "WHERE session_id = ? AND position = ?",
+                (result, elapsed_ms, session_id, position),
             )
             if success:
                 current = connection.execute(
@@ -707,7 +815,8 @@ class Core:
                     (row["puzzle_id"], due.isoformat(), elapsed_ms),
                 )
             return {
-                "date": session_date,
+                "session_id": session_id,
+                "date": row["session_date"],
                 "position": position,
                 "result": result,
                 "elapsed_ms": elapsed_ms,
@@ -720,3 +829,9 @@ def _valid_date(value: str | None) -> str:
         return date.fromisoformat(value).isoformat()
     except ValueError as exc:
         raise ValueError("date must be YYYY-MM-DD") from exc
+
+
+def _valid_session_id(value: int) -> int:
+    if isinstance(value, bool) or not isinstance(value, int) or value < 1:
+        raise ValueError("session_id must be a positive integer")
+    return value
