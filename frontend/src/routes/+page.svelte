@@ -256,7 +256,7 @@
 
 		if (attemptFailed) {
 			feedback = reviewMode
-				? 'Solved on retry'
+				? 'Corrected — review again later'
 				: failurePersisted
 				? 'Solved on retry — first attempt recorded as failed.'
 				: puzzle.result === 'success'
@@ -468,18 +468,18 @@
 
 		let nextIndex: number;
 		if (reviewMode) {
-			reviewQueue = reviewQueue.filter((index) => index !== currentIndex);
+			const remaining = reviewQueue.filter((index) => index !== currentIndex);
+			reviewQueue = attemptFailed ? [...remaining, currentIndex] : remaining;
 			nextIndex = reviewQueue[0] ?? -1;
 		} else {
 			nextIndex = session.puzzles.findIndex(
 				(candidate, index) => index > currentIndex && candidate.result === null
 			);
 		}
-		if (nextIndex >= session.puzzles.length || nextIndex === -1) {
-			if (reviewMode) {
-				reviewComplete = true;
-				reviewQueue = [];
-			}
+		if (reviewMode && reviewQueue.length === 0) {
+			reviewComplete = true;
+			enterSessionComplete();
+		} else if (nextIndex >= session.puzzles.length || nextIndex === -1) {
 			enterSessionComplete();
 		} else {
 			sessionComplete = false;
