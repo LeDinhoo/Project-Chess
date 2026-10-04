@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import { Chessground } from '@lichess-org/chessground';
+	import { glyphToSvg } from '@lichess-org/chessground/glyph';
 	import { Button } from '$lib/components/ui/button/index.js';
 	import '@lichess-org/chessground/assets/chessground.base.css';
 	import '@lichess-org/chessground/assets/chessground.brown.css';
@@ -20,6 +21,8 @@
 		puzzle_id: string;
 		fen: string;
 		moves: string;
+		last_move: string;
+		legal_moves: string[][];
 		rating: number;
 		themes: string;
 		result: 'success' | 'failed' | null;
@@ -39,6 +42,7 @@
 
 	const startingFen = 'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1';
 	const backendResponseError = 'Backend unavailable or returned an invalid response.';
+	const incorrectMoveGlyph = glyphToSvg(1)['✗'](0);
 
 	let boardElement = $state<HTMLDivElement>();
 	let ground: ReturnType<typeof Chessground> | undefined;
@@ -135,6 +139,18 @@
 		return puzzle.moves.trim() ? puzzle.moves.trim().split(/\s+/) : [];
 	}
 
+	function legalDestinations(puzzle: SessionPuzzle, index: number) {
+		const dests = new Map<Square, Square[]>();
+		for (const token of puzzle.legal_moves[index] ?? []) {
+			const parsed = parseUci(token.slice(0, 4));
+			if (!parsed) continue;
+			const destinations = dests.get(parsed.from) ?? [];
+			destinations.push(parsed.to);
+			dests.set(parsed.from, destinations);
+		}
+		return dests;
+	}
+
 	function setLocalResult(
 		date: string,
 		position: number,
@@ -192,18 +208,23 @@
 	function configureBoard(puzzle: SessionPuzzle, interactive: boolean) {
 		if (!ground) return;
 		const color = puzzleColor(puzzle.fen);
+		const lastMove = parseUci(puzzle.last_move);
 		ground.stop();
+		ground.setAutoShapes([]);
 		ground.set({
 			fen: puzzle.fen,
 			orientation: color,
 			turnColor: color,
+			lastMove: lastMove ? [lastMove.from, lastMove.to] : undefined,
 			...(interactive
 				? {
-					movable: {
-						free: true,
-						color,
-						events: { after: handleUserMove }
-					},
+				movable: {
+					free: false,
+					color,
+					dests: legalDestinations(puzzle, Math.floor(solutionIndex / 2)),
+					showDests: true,
+					events: { after: handleUserMove }
+				},
 					premovable: { enabled: false }
 				}
 				: {})
@@ -280,7 +301,17 @@
 					});
 				}
 			}
-			resetForRetry(puzzle);
+			feedback = 'Wrong — try again';
+			const retryDate = currentSession?.date;
+			const retryPosition = puzzle.position;
+			ground?.setAutoShapes([
+				{ orig: dest, customSvg: { html: incorrectMoveGlyph, center: 'orig' } }
+			]);
+			window.setTimeout(() => {
+				if (currentSession?.date === retryDate && currentPuzzle?.position === retryPosition) {
+					resetForRetry(puzzle);
+				}
+			}, 300);
 			return;
 		}
 
@@ -297,7 +328,13 @@
 			}
 			ground?.move(parsed.from, parsed.to);
 			solutionIndex += 1;
-			ground?.set({ turnColor: puzzleColor(puzzle.fen) });
+			ground?.set({
+				turnColor: puzzleColor(puzzle.fen),
+				movable: {
+					dests: legalDestinations(puzzle, Math.floor(solutionIndex / 2)),
+					showDests: true
+				}
+			});
 		}
 
 		if (solutionIndex >= moves.length) completePuzzle();
