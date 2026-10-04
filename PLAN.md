@@ -53,7 +53,7 @@ Workflow:
 7. Only clear tactical mistakes are retained.
 8. Mistakes are classified into a small supported tactical taxonomy.
 9. Matching Lichess puzzles are selected from a local puzzle database.
-10. A persisted daily list of 20 puzzles is created.
+10. A persisted 20-puzzle session is created.
 11. The user solves the puzzles on a chessboard.
 12. Failed/learned puzzles return through a minimal spaced-repetition system.
 13. Old daily sessions remain accessible.
@@ -396,23 +396,24 @@ Stop searching once 20 unique puzzles are selected.
 
 # Daily sessions
 
-A daily session is created only when the user first chooses:
+Each created session has a `session_id INTEGER PRIMARY KEY`; `session_date` is
+retained as metadata, so multiple independent sessions can exist on the same
+date.
 
-Start training.
+`POST /api/sessions/today` resumes the latest session for today and creates the
+first one only when today has none.
 
-Once created:
+`POST /api/sessions` deliberately creates another fresh session for today.
 
-its 20 puzzle IDs are frozen.
+Each created session contains 20 puzzle IDs, and its puzzle list is frozen.
 
-Later Chess.com synchronization on the same day must not alter that session.
+Later Chess.com synchronization on the same day must not alter existing sessions.
 
 New mistakes influence later sessions only.
 
-If today's session already exists:
+Sessions remain independent and reopenable.
 
-resume it.
-
-Old sessions remain reopenable.
+SRS progress remains global by puzzle ID.
 
 No statistics page in the MVP.
 
@@ -516,9 +517,9 @@ Expose only endpoints required by the MVP frontend:
 
 `GET /api/sessions`
 
-`GET /api/sessions/{date}`
+`GET /api/sessions/{session_id}`
 
-`POST /api/sessions/{date}/{position}/result`
+`POST /api/sessions/{session_id}/{position}/result`
 
 Do not add generic CRUD endpoints.
 
