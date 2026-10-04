@@ -28,13 +28,13 @@ Audit status: complete.
 
 Current frontend status: **Step 13 complete**.
 
-Next implementation step: none currently defined; the planned MVP implementation is complete.
+The planned MVP implementation is complete; explicitly approved post-audit maintenance proceeds through review-gated work.
 
 Step 13 Gates 1, 2, and 3 are complete and user-approved.
 
 - Lichess importer validation correction: `b249550a37494e650d9510ff11d8a9b5f737a31f`;
 - focused importer regression coverage: `b1df31fc56b51ab957e518ef57db581f3d2eadcc`;
-- backend regression suite: 15 tests.
+- backend regression suite.
 
 ---
 
@@ -140,8 +140,6 @@ Frontend:
 Backend:
 
 local Python/Uvicorn command.
-
-Do not create a Windows launcher yet.
 
 ---
 
@@ -515,6 +513,8 @@ Expose only endpoints required by the MVP frontend:
 
 `POST /api/sessions/today`
 
+`POST /api/sessions`
+
 `GET /api/sessions`
 
 `GET /api/sessions/{session_id}`
@@ -721,8 +721,6 @@ Required areas:
 Use temporary SQLite databases.
 
 No testing dependency.
-
-Current regression suite: 15 tests.
 
 ---
 
