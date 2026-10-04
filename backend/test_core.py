@@ -413,7 +413,7 @@ class CoreTests(TestCase):
                     self.core.get_session(session_id)
 
     def test_same_day_sessions_are_isolated_and_start_resumes_latest(self):
-        self._add_puzzles([f"puzzle-{number:02d}" for number in range(20)])
+        self._add_puzzles([f"puzzle-{number:02d}" for number in range(40)])
         self._add_weakness()
         first = self.core.create_session()
         second = self.core.create_session()
@@ -424,6 +424,36 @@ class CoreTests(TestCase):
         self.assertIsNone(self.core.get_session(second["session_id"])["puzzles"][0]["result"])
         self.assertEqual(self.core.start_session()["session_id"], second["session_id"])
         self.assertEqual(len(self.core.list_sessions()), 2)
+
+    def test_same_day_exposure_excludes_priority_puzzles_and_limits_srs(self):
+        unfinished_id = "puzzle-unfinished"
+        due_id = "puzzle-due"
+        filler_ids = [f"puzzle-{number:02d}" for number in range(40)]
+        self._add_puzzles([unfinished_id, due_id, *filler_ids])
+        today = real_date.today()
+        self._add_session((today - timedelta(days=1)).isoformat(), [unfinished_id])
+        self._add_progress(due_id, today.isoformat())
+        self._add_weakness()
+
+        first = self.core.create_session()
+        first_ids = [puzzle["puzzle_id"] for puzzle in first["puzzles"]]
+        self.assertIn(unfinished_id, first_ids)
+        self.assertIn(due_id, first_ids)
+
+        unfinished_position = first_ids.index(unfinished_id) + 1
+        self.core.record_result(first["session_id"], unfinished_position, True, 321)
+        with self.core._connect() as connection:
+            progress = connection.execute(
+                "SELECT success_count, last_result FROM puzzle_progress WHERE puzzle_id = ?",
+                (unfinished_id,),
+            ).fetchone()
+        self.assertEqual((progress["success_count"], progress["last_result"]), (1, "success"))
+
+        second = self.core.create_session()
+        second_ids = [puzzle["puzzle_id"] for puzzle in second["puzzles"]]
+        self.assertNotIn(unfinished_id, second_ids)
+        self.assertNotIn(due_id, second_ids)
+        self.assertTrue(set(first_ids).isdisjoint(second_ids))
 
     def test_history_summaries_are_per_session_and_ordered(self):
         self._add_puzzles(["history-a", "history-b", "history-c"])
