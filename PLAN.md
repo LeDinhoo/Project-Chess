@@ -213,11 +213,11 @@ Fetch enough recent archives to obtain:
 
 ## Later synchronizations
 
-Inspect the:
+Collect up to 10 new eligible games, scanning newest-to-oldest and skipping
+already-stored games and duplicates from the same synchronization.
 
-10 most recent eligible games.
-
-Database uniqueness prevents duplicate imports.
+Continue scanning backward until 10 new eligible games are found or history is
+exhausted.
 
 Do not download the user's complete history unnecessarily.
 
