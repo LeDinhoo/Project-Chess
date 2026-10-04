@@ -78,14 +78,16 @@ class CoreTests(TestCase):
 
     def _add_session(self, session_date, puzzle_ids):
         with self.core._connect() as connection:
-            connection.execute(
+            cursor = connection.execute(
                 "INSERT INTO sessions(session_date, created_at) VALUES (?, ?)",
                 (session_date, session_date),
             )
+            session_id = cursor.lastrowid
             connection.executemany(
-                "INSERT INTO session_puzzles(session_date, position, puzzle_id) VALUES (?, ?, ?)",
-                [(session_date, position, puzzle_id) for position, puzzle_id in enumerate(puzzle_ids, 1)],
+                "INSERT INTO session_puzzles(session_id, position, puzzle_id) VALUES (?, ?, ?)",
+                [(session_id, position, puzzle_id) for position, puzzle_id in enumerate(puzzle_ids, 1)],
             )
+            return session_id
 
     def _add_progress(self, puzzle_id, due_date, success_count=0, result="success"):
         with self.core._connect() as connection:
@@ -215,6 +217,7 @@ class CoreTests(TestCase):
         self._add_weakness()
         first = self.core.start_session("2026-01-01")
         second = self.core.start_session("2026-01-01")
+        self.assertEqual(first["session_id"], second["session_id"])
         first_ids = [puzzle["puzzle_id"] for puzzle in first["puzzles"]]
         second_ids = [puzzle["puzzle_id"] for puzzle in second["puzzles"]]
         self.assertEqual(len(first_ids), 20)
@@ -224,7 +227,7 @@ class CoreTests(TestCase):
     def test_unfinished_puzzle_carries_forward_without_changing_history(self):
         puzzle_ids = [f"puzzle-{number:02d}" for number in range(20)]
         self._add_puzzles(puzzle_ids)
-        self._add_session("2026-01-01", [puzzle_ids[0]])
+        old_session_id = self._add_session("2026-01-01", [puzzle_ids[0]])
         self._add_weakness()
         later = self.core.start_session("2026-01-02")
         later_ids = [puzzle["puzzle_id"] for puzzle in later["puzzles"]]
@@ -232,7 +235,7 @@ class CoreTests(TestCase):
         self.assertEqual(len(set(later_ids)), 20)
         with self.core._connect() as connection:
             old = connection.execute(
-                "SELECT puzzle_id, result FROM session_puzzles WHERE session_date = '2026-01-01'"
+                "SELECT puzzle_id, result FROM session_puzzles WHERE session_id = ?", (old_session_id,)
             ).fetchone()
         self.assertEqual((old["puzzle_id"], old["result"]), (puzzle_ids[0], None))
 
@@ -271,13 +274,12 @@ class CoreTests(TestCase):
         puzzle_id = "puzzle-srs"
         self._add_puzzles([puzzle_id])
         session_dates = [f"2026-01-0{number}" for number in range(1, 8)]
-        for session_date in session_dates:
-            self._add_session(session_date, [puzzle_id])
+        session_ids = [self._add_session(session_date, [puzzle_id]) for session_date in session_dates]
         fixed_today = real_date(2026, 1, 1)
         fixed_date = SimpleNamespace(today=lambda: fixed_today, fromisoformat=real_date.fromisoformat)
         with patch("backend.core.date", fixed_date):
             for number, interval in enumerate((3, 7, 14, 30, 30)):
-                self.core.record_result(session_dates[number], 1, True, 100 + number)
+                self.core.record_result(session_ids[number], 1, True, 100 + number)
                 with self.core._connect() as connection:
                     progress = connection.execute(
                         "SELECT success_count, due_date FROM puzzle_progress WHERE puzzle_id = ?",
@@ -288,7 +290,7 @@ class CoreTests(TestCase):
                     progress["due_date"], (fixed_today + timedelta(days=interval)).isoformat()
                 )
 
-            self.core.record_result(session_dates[5], 1, False, 600)
+            self.core.record_result(session_ids[5], 1, False, 600)
             with self.core._connect() as connection:
                 progress = connection.execute(
                     "SELECT success_count, due_date, last_result FROM puzzle_progress WHERE puzzle_id = ?",
@@ -299,7 +301,7 @@ class CoreTests(TestCase):
                 (0, (fixed_today + timedelta(days=1)).isoformat(), "failed"),
             )
 
-            self.core.record_result(session_dates[6], 1, True, 700)
+            self.core.record_result(session_ids[6], 1, True, 700)
             with self.core._connect() as connection:
                 progress = connection.execute(
                     "SELECT success_count, due_date FROM puzzle_progress WHERE puzzle_id = ?",
@@ -313,18 +315,30 @@ class CoreTests(TestCase):
     def test_first_result_wins(self):
         puzzle_id = "puzzle-result"
         self._add_puzzles([puzzle_id])
-        self._add_session("2026-01-01", [puzzle_id])
+        session_id = self._add_session("2026-01-01", [puzzle_id])
         self.assertEqual(
-            self.core.record_result("2026-01-01", 1, False, 321),
-            {"date": "2026-01-01", "position": 1, "result": "failed", "elapsed_ms": 321},
+            self.core.record_result(session_id, 1, False, 321),
+            {
+                "session_id": session_id,
+                "date": "2026-01-01",
+                "position": 1,
+                "result": "failed",
+                "elapsed_ms": 321,
+            },
         )
         self.assertEqual(
-            self.core.record_result("2026-01-01", 1, True, 999),
-            {"date": "2026-01-01", "position": 1, "result": "failed", "elapsed_ms": 321},
+            self.core.record_result(session_id, 1, True, 999),
+            {
+                "session_id": session_id,
+                "date": "2026-01-01",
+                "position": 1,
+                "result": "failed",
+                "elapsed_ms": 321,
+            },
         )
         with self.core._connect() as connection:
             stored = connection.execute(
-                "SELECT result, elapsed_ms FROM session_puzzles WHERE session_date = '2026-01-01'"
+                "SELECT result, elapsed_ms FROM session_puzzles WHERE session_id = ?", (session_id,)
             ).fetchone()
         self.assertEqual((stored["result"], stored["elapsed_ms"]), ("failed", 321))
 
@@ -333,8 +347,8 @@ class CoreTests(TestCase):
         fen = chess.STARTING_FEN
         moves = "e2e4 e7e5 g1f3"
         self._add_puzzles([puzzle_id], fen=fen, moves=moves)
-        self._add_session("2026-01-01", [puzzle_id])
-        payload = self.core.get_session("2026-01-01")
+        session_id = self._add_session("2026-01-01", [puzzle_id])
+        payload = self.core.get_session(session_id)
         board = chess.Board(fen)
         board.push_uci("e2e4")
         self.assertEqual(payload["puzzles"][0]["fen"], board.fen())
@@ -360,7 +374,119 @@ class CoreTests(TestCase):
                     )
                     connection.commit()
                 with self.assertRaisesRegex(RuntimeError, puzzle_id):
-                    self.core.get_session("2026-01-01")
+                    self.core.get_session(session_id)
+
+    def test_same_day_sessions_are_isolated_and_start_resumes_latest(self):
+        self._add_puzzles([f"puzzle-{number:02d}" for number in range(20)])
+        self._add_weakness()
+        first = self.core.create_session()
+        second = self.core.create_session()
+
+        self.assertNotEqual(first["session_id"], second["session_id"])
+        self.assertEqual(first["date"], second["date"])
+        self.core.record_result(first["session_id"], 1, False, 321)
+        self.assertIsNone(self.core.get_session(second["session_id"])["puzzles"][0]["result"])
+        self.assertEqual(self.core.start_session()["session_id"], second["session_id"])
+        self.assertEqual(len(self.core.list_sessions()), 2)
+
+    def test_history_summaries_are_per_session_and_ordered(self):
+        self._add_puzzles(["history-a", "history-b", "history-c"])
+        first = self._add_session("2026-10-04", ["history-a"])
+        older = self._add_session("2026-10-03", ["history-b"])
+        newer = self._add_session("2026-10-04", ["history-c"])
+        self.core.record_result(first, 1, False, 100)
+        self.core.record_result(newer, 1, True, 200)
+
+        self.assertEqual(
+            self.core.list_sessions(),
+            [
+                {
+                    "session_id": newer,
+                    "date": "2026-10-04",
+                    "completed": 1,
+                    "successes": 1,
+                    "failures": 0,
+                    "total": 1,
+                },
+                {
+                    "session_id": first,
+                    "date": "2026-10-04",
+                    "completed": 1,
+                    "successes": 0,
+                    "failures": 1,
+                    "total": 1,
+                },
+                {
+                    "session_id": older,
+                    "date": "2026-10-03",
+                    "completed": 0,
+                    "successes": 0,
+                    "failures": 0,
+                    "total": 1,
+                },
+            ],
+        )
+
+    def test_legacy_session_migration_preserves_data(self):
+        puzzle_ids = ["legacy-one", "legacy-two"]
+        self._add_puzzles(puzzle_ids)
+        legacy_db = Path(self.tempdir.name) / "legacy.db"
+        with closing(sqlite3.connect(legacy_db)) as connection:
+            connection.executescript(
+                """
+                CREATE TABLE sessions (
+                    session_date TEXT PRIMARY KEY,
+                    created_at TEXT NOT NULL
+                );
+                CREATE TABLE session_puzzles (
+                    session_date TEXT NOT NULL REFERENCES sessions(session_date) ON DELETE CASCADE,
+                    position INTEGER NOT NULL,
+                    puzzle_id TEXT NOT NULL,
+                    result TEXT CHECK(result IN ('success', 'failed') OR result IS NULL),
+                    elapsed_ms INTEGER,
+                    PRIMARY KEY(session_date, position)
+                );
+                CREATE TABLE puzzle_progress (
+                    puzzle_id TEXT PRIMARY KEY,
+                    success_count INTEGER NOT NULL DEFAULT 0,
+                    due_date TEXT NOT NULL,
+                    last_result TEXT CHECK(last_result IN ('success', 'failed') OR last_result IS NULL),
+                    last_elapsed_ms INTEGER
+                );
+                """
+            )
+            connection.execute("INSERT INTO sessions VALUES ('2026-10-03', '2026-10-03')")
+            connection.executemany(
+                "INSERT INTO session_puzzles VALUES (?, ?, ?, ?, ?)",
+                [("2026-10-03", 1, puzzle_ids[0], "failed", 321), ("2026-10-03", 2, puzzle_ids[1], None, None)],
+            )
+            connection.execute(
+                "INSERT INTO puzzle_progress VALUES (?, ?, ?, ?, ?)",
+                (puzzle_ids[0], 0, "2026-10-04", "failed", 321),
+            )
+            connection.commit()
+
+        migrated = Core(self.config_path, legacy_db, self.puzzle_db_path)
+        with migrated._connect() as connection:
+            session = connection.execute("SELECT session_id, session_date FROM sessions").fetchone()
+            puzzles = connection.execute(
+                "SELECT position, puzzle_id, result, elapsed_ms FROM session_puzzles "
+                "WHERE session_id = ? ORDER BY position",
+                (session["session_id"],),
+            ).fetchall()
+            progress = connection.execute(
+                "SELECT success_count, due_date, last_result, last_elapsed_ms "
+                "FROM puzzle_progress WHERE puzzle_id = ?",
+                (puzzle_ids[0],),
+            ).fetchone()
+
+        self.assertGreater(session["session_id"], 0)
+        self.assertEqual(session["session_date"], "2026-10-03")
+        self.assertEqual(
+            [(row["position"], row["puzzle_id"], row["result"], row["elapsed_ms"]) for row in puzzles],
+            [(1, puzzle_ids[0], "failed", 321), (2, puzzle_ids[1], None, None)],
+        )
+        self.assertEqual(tuple(progress), (0, "2026-10-04", "failed", 321))
 
 
 if __name__ == "__main__":
