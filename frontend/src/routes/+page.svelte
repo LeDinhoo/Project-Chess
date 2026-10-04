@@ -11,8 +11,11 @@
 	type PlayerColor = 'white' | 'black';
 
 	type SessionSummary = {
+		session_id: number;
 		date: string;
 		completed: number;
+		successes: number;
+		failures: number;
 		total: number;
 	};
 
@@ -36,6 +39,7 @@
 	};
 
 	type SessionPayload = {
+		session_id: number;
 		date: string;
 		puzzles: SessionPuzzle[];
 		completed: number;
@@ -116,6 +120,14 @@
 		return date === `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
 	}
 
+	function historyLabel(session: SessionSummary) {
+		const dateLabel = isToday(session.date) ? 'Today' : session.date;
+		const sameDate = sessions.filter((candidate) => candidate.date === session.date);
+		if (sameDate.length === 1) return dateLabel;
+		const ordinal = sameDate.filter((candidate) => candidate.session_id < session.session_id).length + 1;
+		return `${dateLabel} · Session ${ordinal}`;
+	}
+
 	function stopTimer() {
 		if (timerId !== undefined) {
 			clearInterval(timerId);
@@ -168,12 +180,12 @@
 	}
 
 	function setLocalResult(
-		date: string,
+		sessionId: number,
 		position: number,
 		result: 'success' | 'failed',
 		elapsedMs: number
 	) {
-		if (!currentSession || currentSession.date !== date) return;
+		if (!currentSession || currentSession.session_id !== sessionId) return;
 		currentSession = {
 			...currentSession,
 			puzzles: currentSession.puzzles.map((puzzle) =>
@@ -183,7 +195,7 @@
 	}
 
 	async function saveResult(
-		date: string,
+		sessionId: number,
 		position: number,
 		success: boolean,
 		elapsedMs: number
@@ -192,7 +204,7 @@
 		savingResult = true;
 		resultSaveError = '';
 		try {
-			const response = await fetch(`/api/sessions/${encodeURIComponent(date)}/${position}/result`, {
+			const response = await fetch(`/api/sessions/${sessionId}/${position}/result`, {
 				method: 'POST',
 				headers: { 'Content-Type': 'application/json' },
 				body: JSON.stringify({ success, elapsed_ms: elapsedMs })
@@ -208,10 +220,10 @@
 			) {
 				throw new Error(backendResponseError);
 			}
-			setLocalResult(date, position, saved.result, saved.elapsed_ms);
+			setLocalResult(sessionId, position, saved.result, saved.elapsed_ms);
 			return saved;
 		} catch (caught) {
-			if (currentSession?.date === date && currentSession.puzzles[currentIndex]?.position === position) {
+			if (currentSession?.session_id === sessionId && currentSession.puzzles[currentIndex]?.position === position) {
 				resultSaveError = caughtMessage(caught, 'Could not save the puzzle result.');
 				if (success) feedback = 'Solved, but the result could not be saved.';
 			}
@@ -271,7 +283,7 @@
 
 		feedback = 'Solved';
 		if (reviewMode) return;
-		void saveResult(session.date, puzzle.position, true, elapsedMs).then((saved) => {
+		void saveResult(session.session_id, puzzle.position, true, elapsedMs).then((saved) => {
 			if (saved?.result === 'failed') {
 				feedback = 'Solved, but the first attempt still counts as a mistake.';
 			}
@@ -298,21 +310,21 @@
 				const elapsedMs = elapsedSinceStart();
 				stopTimer();
 				displayElapsedMs = elapsedMs;
-				const date = currentSession?.date;
-				if (!reviewMode && date) {
-					void saveResult(date, puzzle.position, false, elapsedMs).then((saved) => {
+				const sessionId = currentSession?.session_id;
+				if (!reviewMode && sessionId) {
+					void saveResult(sessionId, puzzle.position, false, elapsedMs).then((saved) => {
 						if (saved?.result === 'failed') {
 							failurePersisted = true;
 							if (
 								puzzleSolved &&
-								currentSession?.date === date &&
+								currentSession?.session_id === sessionId &&
 								currentPuzzle?.position === puzzle.position
 							) {
 								feedback = 'Corrected — the first attempt still counts as a mistake.';
 							}
 						} else if (
 							saved?.result === 'success' &&
-							currentSession?.date === date &&
+							currentSession?.session_id === sessionId &&
 							currentPuzzle?.position === puzzle.position
 						) {
 							feedback = 'Already solved on the first attempt.';
@@ -321,13 +333,13 @@
 				}
 			}
 			feedback = 'Wrong — try again';
-			const retryDate = currentSession?.date;
+			const retrySessionId = currentSession?.session_id;
 			const retryPosition = puzzle.position;
 			ground?.setAutoShapes([
 				{ orig: dest, customSvg: { html: incorrectMoveGlyph, center: 'orig' } }
 			]);
 			window.setTimeout(() => {
-				if (currentSession?.date === retryDate && currentPuzzle?.position === retryPosition) {
+				if (currentSession?.session_id === retrySessionId && currentPuzzle?.position === retryPosition) {
 					resetForRetry(puzzle);
 				}
 			}, 300);
@@ -346,12 +358,12 @@
 				ground?.stop();
 				return;
 			}
-			const responseDate = currentSession?.date;
+			const responseSessionId = currentSession?.session_id;
 			const responsePosition = puzzle.position;
 			const expectedSolutionIndex = solutionIndex;
 			window.setTimeout(() => {
 				if (
-					currentSession?.date !== responseDate ||
+					currentSession?.session_id !== responseSessionId ||
 					currentPuzzle?.position !== responsePosition ||
 					solutionIndex !== expectedSolutionIndex
 				) {
@@ -549,11 +561,29 @@
 		}
 	}
 
-	async function openSession(date: string) {
+	async function createSession() {
 		sessionLoading = true;
 		error = '';
 		try {
-			const response = await fetch(`/api/sessions/${encodeURIComponent(date)}`);
+			const response = await fetch('/api/sessions', { method: 'POST' });
+			if (!response.ok) {
+				throw new Error(await requestError(response, 'Could not create a new session.'));
+			}
+			const session = await responseJson<SessionPayload>(response);
+			activateSession(session);
+			await loadSessions();
+		} catch (caught) {
+			error = caughtMessage(caught, 'Could not create a new session.');
+		} finally {
+			sessionLoading = false;
+		}
+	}
+
+	async function openSession(sessionId: number) {
+		sessionLoading = true;
+		error = '';
+		try {
+			const response = await fetch(`/api/sessions/${sessionId}`);
 			if (!response.ok) {
 				throw new Error(await requestError(response, 'Could not load that session.'));
 			}
@@ -614,6 +644,14 @@
 				>
 					{sessionLoading ? 'Loading…' : 'Start / Resume Today'}
 				</Button>
+				<Button
+					variant="secondary"
+					size="lg"
+					onclick={createSession}
+					disabled={sessionLoading || savingResult}
+				>
+					Create session
+				</Button>
 			</section>
 
 			<div class="space-y-1 text-sm" aria-live="polite">
@@ -640,35 +678,29 @@
 						{#each sessions as session}
 							<button
 								type="button"
-								class="flex w-full items-center justify-between border px-3 py-3 text-left transition disabled:cursor-not-allowed disabled:opacity-50 {currentSession?.date === session.date ? 'border-primary bg-accent text-accent-foreground' : 'border-border bg-background hover:bg-accent'}"
-								onclick={() => openSession(session.date)}
+								class="flex w-full items-center justify-between border px-3 py-3 text-left transition disabled:cursor-not-allowed disabled:opacity-50 {currentSession?.session_id === session.session_id ? 'border-primary bg-accent text-accent-foreground' : 'border-border bg-background hover:bg-accent'}"
+								onclick={() => openSession(session.session_id)}
 								disabled={sessionLoading || savingResult}
-								aria-pressed={currentSession?.date === session.date}
+								aria-pressed={currentSession?.session_id === session.session_id}
 							>
 								<span class="min-w-0 space-y-1">
-									<span class="block font-medium">{isToday(session.date) ? 'Today' : session.date}</span>
+									<span class="block font-medium">{historyLabel(session)}</span>
 									<span class="block text-sm text-muted-foreground">
 										{#if session.completed < session.total}
 											{session.completed}/{session.total} completed
-										{:else if currentSession?.date === session.date}
-											{recordedSuccessCount}/{session.total} successful
 										{:else}
-											{session.total}/{session.total} complete
+											{session.successes}/{session.total} successful
 										{/if}
 									</span>
 								</span>
 								<span class="text-right text-sm text-muted-foreground">
 									{#if session.completed < session.total}
 										{session.total - session.completed} remaining
-									{:else if currentSession?.date === session.date}
-										{#if recordedFailedCount > 0}
-											<span class="text-destructive">{recordedFailedCount} {recordedFailedCount === 1 ? 'mistake' : 'mistakes'}</span>
+									{:else if session.failures > 0}
+										<span class="text-destructive">{session.failures} {session.failures === 1 ? 'mistake' : 'mistakes'}</span>
 										{:else}
 											Perfect
 										{/if}
-									{:else}
-										Complete
-									{/if}
 								</span>
 							</button>
 						{/each}
