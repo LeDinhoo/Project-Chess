@@ -31,15 +31,25 @@ def start_today():
         raise HTTPException(status_code=503, detail=str(exc)) from exc
 
 
+@app.post("/api/sessions")
+def create_session():
+    try:
+        return core.create_session()
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+
 @app.get("/api/sessions")
 def list_sessions():
     return core.list_sessions()
 
 
-@app.get("/api/sessions/{date}")
-def get_session(date: str):
+@app.get("/api/sessions/{session_id}")
+def get_session(session_id: int):
     try:
-        session = core.get_session(date)
+        session = core.get_session(session_id)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except RuntimeError as exc:
@@ -49,9 +59,9 @@ def get_session(date: str):
     return session
 
 
-@app.post("/api/sessions/{date}/{position}/result")
-def record_result(date: str, position: int, request: ResultRequest):
+@app.post("/api/sessions/{session_id}/{position}/result")
+def record_result(session_id: int, position: int, request: ResultRequest):
     try:
-        return core.record_result(date, position, request.success, request.elapsed_ms)
+        return core.record_result(session_id, position, request.success, request.elapsed_ms)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
