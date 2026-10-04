@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import { Chessground } from '@lichess-org/chessground';
-	import { glyphToSvg } from '@lichess-org/chessground/glyph';
+	import { endgameGlyphs, glyphToSvg } from '@lichess-org/chessground/glyph';
 	import { Button } from '$lib/components/ui/button/index.js';
 	import '@lichess-org/chessground/assets/chessground.base.css';
 	import '@lichess-org/chessground/assets/chessground.brown.css';
@@ -23,6 +23,7 @@
 		moves: string;
 		last_move: string;
 		legal_moves: string[][];
+		checkmate_kings: (string | null)[];
 		rating: number;
 		themes: string;
 		result: 'success' | 'failed' | null;
@@ -42,7 +43,9 @@
 
 	const startingFen = 'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1';
 	const backendResponseError = 'Backend unavailable or returned an invalid response.';
+	const correctMoveGlyph = glyphToSvg(1)['✓'](0);
 	const incorrectMoveGlyph = glyphToSvg(1)['✗'](0);
+	const mateGlyph = endgameGlyphs(1).mate(0);
 
 	let boardElement = $state<HTMLDivElement>();
 	let ground: ReturnType<typeof Chessground> | undefined;
@@ -315,6 +318,7 @@
 			return;
 		}
 
+		const userTurnIndex = Math.floor(solutionIndex / 2);
 		solutionIndex += 1;
 		const opponentMove = moves[solutionIndex];
 		if (opponentMove) {
@@ -326,16 +330,41 @@
 				ground?.stop();
 				return;
 			}
-			ground?.move(parsed.from, parsed.to);
-			solutionIndex += 1;
-			ground?.set({
-				turnColor: puzzleColor(puzzle.fen),
-				movable: {
-					dests: legalDestinations(puzzle, Math.floor(solutionIndex / 2)),
-					showDests: true
+			const responseDate = currentSession?.date;
+			const responsePosition = puzzle.position;
+			const expectedSolutionIndex = solutionIndex;
+			window.setTimeout(() => {
+				if (
+					currentSession?.date !== responseDate ||
+					currentPuzzle?.position !== responsePosition ||
+					solutionIndex !== expectedSolutionIndex
+				) {
+					return;
 				}
-			});
+				ground?.move(parsed.from, parsed.to);
+				ground?.setAutoShapes([]);
+				solutionIndex += 1;
+				ground?.set({
+					turnColor: puzzleColor(puzzle.fen),
+					movable: {
+						dests: legalDestinations(puzzle, Math.floor(solutionIndex / 2)),
+						showDests: true
+					}
+				});
+				if (solutionIndex >= moves.length) completePuzzle();
+				else feedback = 'Your move';
+			}, 300);
+			return;
 		}
+
+		const successShapes = [
+			{ orig: dest, customSvg: { html: correctMoveGlyph, center: 'orig' as const } }
+		];
+		const kingSquare = puzzle.checkmate_kings[userTurnIndex];
+		if (kingSquare && /^[a-h][1-8]$/.test(kingSquare)) {
+			successShapes.push({ orig: kingSquare as Square, customSvg: { html: mateGlyph, center: 'orig' as const } });
+		}
+		ground?.setAutoShapes(successShapes);
 
 		if (solutionIndex >= moves.length) completePuzzle();
 		else feedback = 'Your move';
