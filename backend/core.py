@@ -556,6 +556,7 @@ class Core:
                     board.push(setup_move)
                     display_fen = board.fen()
                     legal_moves = []
+                    checkmate_kings = []
                     for index, token in enumerate(moves[1:], 1):
                         move = chess.Move.from_uci(token)
                         if index % 2 == 1:
@@ -563,6 +564,11 @@ class Core:
                         if not board.is_legal(move):
                             raise ValueError(f"illegal move: {token}")
                         board.push(move)
+                        if index % 2 == 1:
+                            if board.is_checkmate():
+                                checkmate_kings.append(chess.square_name(board.king(board.turn)))
+                            else:
+                                checkmate_kings.append(None)
                 except (AttributeError, IndexError, TypeError, ValueError) as exc:
                     raise RuntimeError(
                         f"invalid puzzle data for {puzzle['puzzle_id']}: {exc}"
@@ -575,6 +581,7 @@ class Core:
                         "moves": " ".join(moves[1:]),
                         "last_move": moves[0],
                         "legal_moves": legal_moves,
+                        "checkmate_kings": checkmate_kings,
                         "rating": puzzle["rating"],
                         "themes": puzzle["themes"],
                         "result": row["result"],
