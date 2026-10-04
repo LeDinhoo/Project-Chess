@@ -398,16 +398,24 @@ class Core:
         config = _config(self.config_path)
         with self._connect() as connection:
             stored_games = connection.execute("SELECT COUNT(*) FROM games").fetchone()[0]
+            stored_ids = {
+                row[0] for row in connection.execute("SELECT game_id FROM games")
+            }
         target = config["initial_games"] if stored_games == 0 else 10
 
         archives = _archive_urls(config["chesscom_username"])
         candidates: list[chess.pgn.Game] = []
+        seen_ids = set(stored_ids)
         try:
             for archive in reversed(archives):
                 text = _request_bytes(archive + "/pgn").decode("utf-8", errors="replace")
                 archive_games = list(_pgn_games(text))
                 for game in reversed(archive_games):
                     if is_eligible_time_control(_time_control(game.headers)):
+                        game_id = _game_id(game)
+                        if game_id in seen_ids:
+                            continue
+                        seen_ids.add(game_id)
                         candidates.append(game)
                         if len(candidates) >= target:
                             break
@@ -417,16 +425,8 @@ class Core:
             raise SyncError(f"Chess.com is unavailable: {exc}") from exc
 
         new_games = []
-        seen_ids = set()
-        with self._connect() as connection:
-            for game in candidates:
-                game_id = _game_id(game)
-                if game_id in seen_ids or connection.execute(
-                    "SELECT 1 FROM games WHERE game_id = ?", (game_id,)
-                ).fetchone():
-                    continue
-                seen_ids.add(game_id)
-                new_games.append((game_id, game))
+        for game in candidates:
+            new_games.append((_game_id(game), game))
 
         analyzed: list[tuple[str, chess.pgn.Game, list[tuple[int, str, str, int]]]] = []
         if new_games:
