@@ -64,7 +64,6 @@
 	let recordedFailedCount = $derived(
 		currentSession?.puzzles.filter((puzzle) => puzzle.result === 'failed').length ?? 0
 	);
-	let recordedCount = $derived(currentSession?.puzzles.filter((puzzle) => puzzle.result !== null).length ?? 0);
 	let sessionComplete = $state(false);
 	let reviewMode = $state(false);
 	let reviewQueue = $state<number[]>([]);
@@ -110,6 +109,11 @@
 	function formatElapsed(elapsedMs: number) {
 		const totalSeconds = Math.floor(elapsedMs / 1000);
 		return `${String(Math.floor(totalSeconds / 60)).padStart(2, '0')}:${String(totalSeconds % 60).padStart(2, '0')}.${Math.floor((elapsedMs % 1000) / 100)}`;
+	}
+
+	function isToday(date: string) {
+		const today = new Date();
+		return date === `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
 	}
 
 	function stopTimer() {
@@ -258,10 +262,10 @@
 			feedback = reviewMode
 				? 'Corrected — review again later'
 				: failurePersisted
-				? 'Solved on retry — first attempt recorded as failed.'
+				? 'Corrected — the first attempt still counts as a mistake.'
 				: puzzle.result === 'success'
-					? 'Result was already recorded as successful.'
-					: 'Solved on retry — first attempt failed, but the result could not be saved.';
+					? 'Already solved on the first attempt.'
+					: 'Corrected — the first attempt still counts as a mistake.';
 			return;
 		}
 
@@ -269,7 +273,7 @@
 		if (reviewMode) return;
 		void saveResult(session.date, puzzle.position, true, elapsedMs).then((saved) => {
 			if (saved?.result === 'failed') {
-				feedback = 'Solved, but this puzzle was already recorded as failed.';
+				feedback = 'Solved, but the first attempt still counts as a mistake.';
 			}
 		});
 	}
@@ -304,14 +308,14 @@
 								currentSession?.date === date &&
 								currentPuzzle?.position === puzzle.position
 							) {
-								feedback = 'Solved on retry — first attempt recorded as failed.';
+								feedback = 'Corrected — the first attempt still counts as a mistake.';
 							}
 						} else if (
 							saved?.result === 'success' &&
 							currentSession?.date === date &&
 							currentPuzzle?.position === puzzle.position
 						) {
-							feedback = 'Result was already recorded as successful.';
+							feedback = 'Already solved on the first attempt.';
 						}
 					});
 				}
@@ -399,7 +403,7 @@
 		if (!reviewMode && puzzle.result !== null) {
 			configureBoard(puzzle, false);
 			feedback =
-				puzzle.result === 'success' ? 'Solved — result already recorded' : 'Failed — result already recorded';
+				puzzle.result === 'success' ? 'Solved on the first attempt' : 'Mistake already counted';
 			return;
 		}
 
@@ -641,8 +645,31 @@
 								disabled={sessionLoading || savingResult}
 								aria-pressed={currentSession?.date === session.date}
 							>
-								<span class="font-medium">{session.date}</span>
-								<span class="text-sm text-muted-foreground">{session.completed}/{session.total}</span>
+								<span class="min-w-0 space-y-1">
+									<span class="block font-medium">{isToday(session.date) ? 'Today' : session.date}</span>
+									<span class="block text-sm text-muted-foreground">
+										{#if session.completed < session.total}
+											{session.completed}/{session.total} completed
+										{:else if currentSession?.date === session.date}
+											{recordedSuccessCount}/{session.total} successful
+										{:else}
+											{session.total}/{session.total} complete
+										{/if}
+									</span>
+								</span>
+								<span class="text-right text-sm text-muted-foreground">
+									{#if session.completed < session.total}
+										{session.total - session.completed} remaining
+									{:else if currentSession?.date === session.date}
+										{#if recordedFailedCount > 0}
+											<span class="text-destructive">{recordedFailedCount} {recordedFailedCount === 1 ? 'mistake' : 'mistakes'}</span>
+										{:else}
+											Perfect
+										{/if}
+									{:else}
+										Complete
+									{/if}
+								</span>
 							</button>
 						{/each}
 					</div>
@@ -654,12 +681,32 @@
 			{#if currentSession && currentPuzzle}
 				<div class="flex shrink-0 flex-col gap-2 border-b border-border pb-3 sm:flex-row sm:items-end sm:justify-between">
 					<div>
-						<p class="text-xs font-semibold uppercase tracking-[0.2em] text-primary">Session {currentSession.date}</p>
+						<p class="text-xs font-semibold uppercase tracking-[0.2em] text-primary">
+							{#if sessionComplete}
+								{reviewComplete ? 'Review complete' : 'First pass complete'}
+							{:else if reviewMode}
+								Review
+							{:else}
+								First pass
+							{/if}
+						</p>
 						<h2 class="mt-1 text-2xl font-semibold tracking-tight">
-							{sessionComplete ? 'Session complete' : `Puzzle ${currentPuzzle.position} of ${currentSession.puzzles.length}`}
+							{#if sessionComplete}
+								{reviewComplete ? 'Review complete' : 'First pass complete'}
+							{:else if reviewMode}
+								{reviewQueue.length} {reviewQueue.length === 1 ? 'mistake' : 'mistakes'} remaining
+							{:else}
+								Puzzle {currentPuzzle.position} of {currentSession.puzzles.length}
+							{/if}
 						</h2>
-						{#if sessionComplete}
-							<p class="mt-1 text-sm text-muted-foreground">{recordedCount} / {currentSession.puzzles.length} puzzles recorded</p>
+						{#if reviewMode}
+							<p class="mt-1 text-sm text-muted-foreground">First pass: {recordedSuccessCount}/{currentSession.puzzles.length} successful</p>
+						{:else if sessionComplete}
+							<p class="mt-1 text-sm text-muted-foreground">{recordedSuccessCount}/{currentSession.puzzles.length} successful</p>
+						{:else}
+							<p class="mt-1 text-sm text-muted-foreground">
+								{recordedSuccessCount} successful · {recordedFailedCount} {recordedFailedCount === 1 ? 'mistake' : 'mistakes'}
+							</p>
 						{/if}
 					</div>
 					<div class="flex flex-wrap items-center gap-x-4 gap-y-1 text-sm text-muted-foreground">
@@ -674,9 +721,6 @@
 							{#if resultSaveError}
 								<span class="text-destructive" role="alert">{resultSaveError}</span>
 							{/if}
-							<span>{recordedSuccessCount} successful</span>
-							<span class="text-destructive">{recordedFailedCount} failed</span>
-							<span>{recordedCount}/{currentSession.puzzles.length} recorded</span>
 							<span>Rating: {currentPuzzle.rating}</span>
 							<span>Themes: {currentPuzzle.themes}</span>
 							{#if puzzleSolved}
@@ -709,18 +753,27 @@
 					<div class="absolute inset-0 flex items-center justify-center p-2 sm:p-4" role="status">
 						<div class="w-full max-w-2xl space-y-6 border border-border bg-background p-6 text-center sm:p-10">
 							<div class="space-y-2">
-								<p class="text-xs font-semibold uppercase tracking-[0.2em] text-primary">{reviewComplete ? 'Review complete' : 'Session complete'}</p>
+								<p class="text-xs font-semibold uppercase tracking-[0.2em] text-primary">{reviewComplete ? 'Review complete' : 'First pass complete'}</p>
 								<h3 class="text-3xl font-semibold tracking-tight">
-									{reviewComplete ? 'Review complete' : `${currentSession.puzzles.length}-puzzle session complete`}
+									{reviewComplete ? 'Review complete' : 'First pass complete'}
 								</h3>
 								<p class="text-muted-foreground">
-									{reviewComplete ? 'All missed puzzles were corrected.' : 'Your recorded results are ready.'}
+									{#if reviewComplete}
+										All missed puzzles were corrected.
+									{:else if recordedFailedCount > 0}
+										Your first-pass score is final.
+									{:else}
+										Your first-pass score is complete.
+									{/if}
 								</p>
 							</div>
 							<div class="flex flex-wrap justify-center gap-x-6 gap-y-2 text-sm">
-								<span>{recordedSuccessCount} successful</span>
-								<span class="text-destructive">{recordedFailedCount} failed</span>
-								<span>{recordedCount}/{currentSession.puzzles.length} recorded</span>
+								<span>{reviewComplete ? 'First pass: ' : ''}{recordedSuccessCount}/{currentSession.puzzles.length} successful</span>
+								{#if recordedFailedCount > 0}
+									<span class="text-destructive">{recordedFailedCount} {recordedFailedCount === 1 ? 'mistake' : 'mistakes'}</span>
+								{:else}
+									<span>No mistakes to review</span>
+								{/if}
 							</div>
 							{#if recordedFailedCount > 0 && !reviewComplete}
 								<p class="text-sm text-muted-foreground">
